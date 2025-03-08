@@ -40,46 +40,46 @@ namespace capi {
 } // namespace capi
 } // namespace
 
-inline std::unique_ptr<ns::RenamedOpaqueArithmatic> ns::RenamedOpaqueArithmatic::add(const ns::RenamedOpaqueArithmatic& o) const {
+inline std::unique_ptr<ns::RenamedOpaqueArithmatic> ns::RenamedOpaqueArithmatic::operator+(const ns::RenamedOpaqueArithmatic& o) const {
   auto result = ns::capi::namespace_OpaqueArithmatic_add(this->AsFFI(),
     o.AsFFI());
   return std::unique_ptr<ns::RenamedOpaqueArithmatic>(ns::RenamedOpaqueArithmatic::FromFFI(result));
 }
 
-inline std::unique_ptr<ns::RenamedOpaqueArithmatic> ns::RenamedOpaqueArithmatic::sub(const ns::RenamedOpaqueArithmatic& o) const {
+inline std::unique_ptr<ns::RenamedOpaqueArithmatic> ns::RenamedOpaqueArithmatic::operator-(const ns::RenamedOpaqueArithmatic& o) const {
   auto result = ns::capi::namespace_OpaqueArithmatic_sub(this->AsFFI(),
     o.AsFFI());
   return std::unique_ptr<ns::RenamedOpaqueArithmatic>(ns::RenamedOpaqueArithmatic::FromFFI(result));
 }
 
-inline std::unique_ptr<ns::RenamedOpaqueArithmatic> ns::RenamedOpaqueArithmatic::mul(const ns::RenamedOpaqueArithmatic& o) const {
+inline std::unique_ptr<ns::RenamedOpaqueArithmatic> ns::RenamedOpaqueArithmatic::operator*(const ns::RenamedOpaqueArithmatic& o) const {
   auto result = ns::capi::namespace_OpaqueArithmatic_mul(this->AsFFI(),
     o.AsFFI());
   return std::unique_ptr<ns::RenamedOpaqueArithmatic>(ns::RenamedOpaqueArithmatic::FromFFI(result));
 }
 
-inline std::unique_ptr<ns::RenamedOpaqueArithmatic> ns::RenamedOpaqueArithmatic::div(const ns::RenamedOpaqueArithmatic& o) const {
+inline std::unique_ptr<ns::RenamedOpaqueArithmatic> ns::RenamedOpaqueArithmatic::operator/(const ns::RenamedOpaqueArithmatic& o) const {
   auto result = ns::capi::namespace_OpaqueArithmatic_div(this->AsFFI(),
     o.AsFFI());
   return std::unique_ptr<ns::RenamedOpaqueArithmatic>(ns::RenamedOpaqueArithmatic::FromFFI(result));
 }
 
-inline void ns::RenamedOpaqueArithmatic::addassign(const ns::RenamedOpaqueArithmatic& o) {
+inline void ns::RenamedOpaqueArithmatic::operator+=(const ns::RenamedOpaqueArithmatic& o) {
   ns::capi::namespace_OpaqueArithmatic_addassign(this->AsFFI(),
     o.AsFFI());
 }
 
-inline void ns::RenamedOpaqueArithmatic::subassign(const ns::RenamedOpaqueArithmatic& o) {
+inline void ns::RenamedOpaqueArithmatic::operator-=(const ns::RenamedOpaqueArithmatic& o) {
   ns::capi::namespace_OpaqueArithmatic_subassign(this->AsFFI(),
     o.AsFFI());
 }
 
-inline void ns::RenamedOpaqueArithmatic::mulassign(const ns::RenamedOpaqueArithmatic& o) {
+inline void ns::RenamedOpaqueArithmatic::operator*=(const ns::RenamedOpaqueArithmatic& o) {
   ns::capi::namespace_OpaqueArithmatic_mulassign(this->AsFFI(),
     o.AsFFI());
 }
 
-inline void ns::RenamedOpaqueArithmatic::divassign(const ns::RenamedOpaqueArithmatic& o) {
+inline void ns::RenamedOpaqueArithmatic::operator/=(const ns::RenamedOpaqueArithmatic& o) {
   ns::capi::namespace_OpaqueArithmatic_divassign(this->AsFFI(),
     o.AsFFI());
 }
