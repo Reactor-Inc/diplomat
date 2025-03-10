@@ -37,6 +37,7 @@ pub(crate) fn attr_support() -> BackendAttrSupport {
     a.stringifiers = false; // TODO
     a.iterators = false; // TODO
     a.iterables = false; // TODO
+    a.arithmatic = true;
     a.indexing = false; // TODO
     a.option = true;
     a.callbacks = true;
