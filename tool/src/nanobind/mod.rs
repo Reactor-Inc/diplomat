@@ -2,9 +2,9 @@ mod binding;
 mod formatter;
 mod ty;
 
-use std::{borrow::Cow, collections::HashSet, path::Path};
+use std::{borrow::Cow, collections::HashSet};
 
-use crate::{ErrorStore, FileMap};
+use crate::{Config, ErrorStore, FileMap};
 use binding::Binding;
 use diplomat_core::hir::{self, BackendAttrSupport};
 use formatter::PyFormatter;
@@ -37,6 +37,7 @@ pub(crate) fn attr_support() -> BackendAttrSupport {
     a.stringifiers = false; // TODO
     a.iterators = false; // TODO
     a.iterables = false; // TODO
+    a.arithmetic = true;
     a.indexing = false; // TODO
     a.option = true;
     a.callbacks = true;
@@ -50,24 +51,19 @@ struct PythonConfig {
     lib_name: String,
 }
 
-pub(crate) fn run<'tcx>(
-    tcx: &'tcx hir::TypeContext,
-    conf_path: Option<&Path>,
-) -> (FileMap, ErrorStore<'tcx, String>) {
-    let conf_path = conf_path.expect("Nanobind library needs to be called with config");
-
-    let conf_str = std::fs::read_to_string(conf_path)
-        .unwrap_or_else(|err| panic!("Failed to open config file {conf_path:?}: {err}"));
-    let PythonConfig { lib_name } = toml::from_str::<PythonConfig>(&conf_str)
-        .expect("Failed to parse config. Required field is 'lib_name'");
-
+pub(crate) fn run(tcx: &hir::TypeContext, conf: Config) -> (FileMap, ErrorStore<'_, String>) {
     let files = FileMap::default();
     let formatter = PyFormatter::new(tcx);
     let errors = ErrorStore::default();
 
+    let lib_name = conf
+        .shared_config
+        .lib_name
+        .expect("Nanobind backend requires lib_name to be set in the config");
+
     let nanobind_filepath = format!("{lib_name}_ext.cpp");
     let mut binding = Binding::new();
-    binding.module_name = Cow::from(lib_name);
+    binding.module_name = lib_name.into();
 
     let mut submodules = HashSet::<Cow<str>>::new();
     for (id, ty) in tcx.all_types() {

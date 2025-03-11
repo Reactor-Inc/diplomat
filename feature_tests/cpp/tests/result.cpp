@@ -30,7 +30,6 @@ int main(int argc, char *argv[])
     auto in_enum_err = ResultOpaque::new_in_enum_err(989).err().value();
     in_enum_err->assert_integer(989);
 
-    // Note: This fails to compile due to std::optional not allowing & types
-    // auto str_result = r2->takes_str("fish");
-    // simple_assert_eq("Did not return a chaining value correctly", &str_result.ok().value(), r2.get());
+    auto str_result = r2->takes_str("fish").ok();
+    simple_assert_eq("Did not return a chaining value correctly", &str_result.value().get(), r2.get());
 }

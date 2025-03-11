@@ -14,17 +14,16 @@ struct OptionInputStruct;
 struct OptionStruct;
 class OptionEnum;
 
-namespace diplomat
-{
-  namespace capi
-  {
+
+namespace diplomat {
+namespace capi {
     struct OptionOpaque;
-  } // namespace capi
+} // namespace capi
 } // namespace
 
-class OptionOpaque
-{
+class OptionOpaque {
 public:
+
   inline static std::unique_ptr<OptionOpaque> new_(int32_t i);
 
   inline static std::unique_ptr<OptionOpaque> new_none();
@@ -45,7 +44,7 @@ public:
 
   inline void assert_integer(int32_t i) const;
 
-  inline static bool option_opaque_argument(const OptionOpaque *arg);
+  inline static bool option_opaque_argument(const OptionOpaque* arg);
 
   inline static std::optional<uint8_t> accepts_option_u8(std::optional<uint8_t> arg);
 
@@ -61,19 +60,19 @@ public:
 
   inline static int64_t accepts_option_primitive(std::optional<diplomat::span<const uint32_t>> arg);
 
-  inline const diplomat::capi::OptionOpaque *AsFFI() const;
-  inline diplomat::capi::OptionOpaque *AsFFI();
-  inline static const OptionOpaque *FromFFI(const diplomat::capi::OptionOpaque *ptr);
-  inline static OptionOpaque *FromFFI(diplomat::capi::OptionOpaque *ptr);
-  inline static void operator delete(void *ptr);
-
+  inline const diplomat::capi::OptionOpaque* AsFFI() const;
+  inline diplomat::capi::OptionOpaque* AsFFI();
+  inline static const OptionOpaque* FromFFI(const diplomat::capi::OptionOpaque* ptr);
+  inline static OptionOpaque* FromFFI(diplomat::capi::OptionOpaque* ptr);
+  inline static void operator delete(void* ptr);
 private:
   OptionOpaque() = delete;
-  OptionOpaque(const OptionOpaque &) = delete;
-  OptionOpaque(OptionOpaque &&) noexcept = delete;
-  OptionOpaque operator=(const OptionOpaque &) = delete;
-  OptionOpaque operator=(OptionOpaque &&) noexcept = delete;
-  static void operator delete[](void *, size_t) = delete;
+  OptionOpaque(const OptionOpaque&) = delete;
+  OptionOpaque(OptionOpaque&&) noexcept = delete;
+  OptionOpaque operator=(const OptionOpaque&) = delete;
+  OptionOpaque operator=(OptionOpaque&&) noexcept = delete;
+  static void operator delete[](void*, size_t) = delete;
 };
+
 
 #endif // OptionOpaque_D_HPP

@@ -48,6 +48,7 @@
 #include "ns/AttrOpaque1Renamed.hpp"
 #include "ns/RenamedAttrEnum.hpp"
 #include "ns/RenamedAttrOpaque2.hpp"
+#include "ns/RenamedOpaqueArithmetic.hpp"
 
 namespace nb = nanobind;
 using namespace nb::literals;
@@ -334,6 +335,24 @@ NB_MODULE(somelib, somelib_mod)
     
     nb::class_<nested::ns2::Nested>(ns2_mod, "Nested", nb::type_slots(nested_ns2_Nested_slots));
     
+    PyType_Slot ns_RenamedOpaqueArithmetic_slots[] = {
+        {Py_tp_free, (void *)ns::RenamedOpaqueArithmetic::operator delete },
+        {Py_tp_dealloc, (void *)diplomat_tp_dealloc},
+        {0, nullptr}};
+    
+    nb::class_<ns::RenamedOpaqueArithmetic>(ns_mod, "RenamedOpaqueArithmetic", nb::type_slots(ns_RenamedOpaqueArithmetic_slots))
+    	.def_static("make", &ns::RenamedOpaqueArithmetic::make, "x"_a, "y"_a)
+    	.def("x", &ns::RenamedOpaqueArithmetic::x)
+    	.def("y", &ns::RenamedOpaqueArithmetic::y)
+    	.def(nb::self + nb::self)
+    	.def(nb::self - nb::self)
+    	.def(nb::self * nb::self)
+    	.def(nb::self / nb::self)
+    	.def(nb::self += nb::self, nb::rv_policy::none)
+    	.def(nb::self -= nb::self, nb::rv_policy::none)
+    	.def(nb::self *= nb::self, nb::rv_policy::none)
+    	.def(nb::self /= nb::self, nb::rv_policy::none);
+    
     PyType_Slot Unnamespaced_slots[] = {
         {Py_tp_free, (void *)Unnamespaced::operator delete },
         {Py_tp_dealloc, (void *)diplomat_tp_dealloc},
@@ -479,7 +498,7 @@ NB_MODULE(somelib, somelib_mod)
     	.def("set_value", &Float64Vec::set_value, "new_slice"_a)
     	.def("to_string", &Float64Vec::to_string)
     	.def("borrow", &Float64Vec::borrow)
-    	.def("get", &Float64Vec::get, "i"_a);
+    	.def("__getitem__", &Float64Vec::operator[], "i"_a);
     
     PyType_Slot MyString_slots[] = {
         {Py_tp_free, (void *)MyString::operator delete },

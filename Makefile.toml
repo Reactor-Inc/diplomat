@@ -14,7 +14,7 @@ default_to_workspace = false
 [env]
 # C++ flags to pass when running check-cpp with clang
 # Based on what our clients care about
-CXX_FLAGS_FOR_CHECK="-Wc++98-compat-extra-semi -Wextra-semi"
+CXX_FLAGS_FOR_CHECK = "-Wc++98-compat-extra-semi -Wextra-semi"
 
 # Metatasks invoked by CI
 [tasks.test-native]
@@ -433,7 +433,7 @@ script_runner = "@duckscript"
 script = '''
 exit_on_error true
 !include_files ./support/functions.ds
-generate_generic feature_tests demo_gen demo "-l diplomat-demo-conf.toml"
+generate_generic feature_tests demo_gen demo
 '''
 
 [tasks.gen-demo-example]
@@ -442,7 +442,7 @@ script_runner = "@duckscript"
 script = '''
 exit_on_error true
 !include_files ./support/functions.ds
-generate_generic example demo_gen demo "-l diplomat-demo-conf.toml"
+generate_generic example demo_gen demo
 '''
 
 [tasks.gen-dart-feature]
@@ -471,7 +471,7 @@ script_runner = "@duckscript"
 script = '''
 exit_on_error true
 !include_files ./support/functions.ds
-generate_generic feature_tests kotlin somelib "-l diplomat-kt-conf.toml" /src/main/kotlin
+generate_generic feature_tests kotlin somelib "" /src/main/kotlin
 '''
 
 [tasks.gen-kotlin-example]
@@ -480,7 +480,7 @@ script_runner = "@duckscript"
 script = '''
 exit_on_error true
 !include_files ./support/functions.ds
-generate_generic example kotlin somelib "-l diplomat-kt-conf.toml" /src/main/kotlin
+generate_generic example kotlin somelib "" /src/main/kotlin
 '''
 
 [tasks.gen-nanobind-feature]
@@ -490,7 +490,7 @@ script_runner = "@duckscript"
 script = '''
 exit_on_error true
 !include_files ./support/functions.ds
-generate_generic feature_tests nanobind src/cpp "-l diplomat-py-conf.toml" 
+generate_generic feature_tests nanobind src/cpp
 mv nanobind/src/cpp/somelib_ext.cpp nanobind/src/somelib_ext.cpp
 rm -rf nanobind/src/cpp
 '''
