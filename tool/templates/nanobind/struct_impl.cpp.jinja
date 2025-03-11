@@ -1,4 +1,6 @@
-{% include "module_impl.cpp.jinja" %}
+{%- include "module_impl.cpp.jinja" -%}
+{%- let auto_define_self_arithmatic = true ~%}
+
 nb::class_<{{type_name}}>({{module}}_mod, "{{type_name_unnamespaced}}")
     .def(nb::init<>())
     {%- if fields.len() > 0 -%}

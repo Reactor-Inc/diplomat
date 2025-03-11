@@ -39,6 +39,7 @@
 #include "RefList.hpp"
 #include "RefListParameter.hpp"
 #include "ResultOpaque.hpp"
+#include "StructArithmetic.hpp"
 #include "Two.hpp"
 #include "UnimportedEnum.hpp"
 #include "Unnamespaced.hpp"
@@ -283,6 +284,19 @@ NB_MODULE(somelib, somelib_mod)
     	.def_static("fails_zst_result", &MyStruct::fails_zst_result);
     nb::class_<MyZst>(somelib_mod, "MyZst")
         .def(nb::init<>());
+    nb::class_<StructArithmetic>(somelib_mod, "StructArithmetic")
+        .def(nb::init<>()).def(nb::init<int32_t, int32_t>(), "x"_a.none(),  "y"_a.none())
+        .def_rw("x", &StructArithmetic::x)
+        .def_rw("y", &StructArithmetic::y)
+    	.def_static("new_", &StructArithmetic::new_, "x"_a, "y"_a)
+    	.def(nb::self + nb::self) 	
+    	.def(nb::self += nb::self)
+    	.def(nb::self - nb::self) 	
+    	.def(nb::self -= nb::self)
+    	.def(nb::self * nb::self) 	
+    	.def(nb::self *= nb::self)
+    	.def(nb::self / nb::self) 	
+    	.def(nb::self /= nb::self);
     nb::class_<OptionStruct>(somelib_mod, "OptionStruct")
         .def(nb::init<>()).def(nb::init<std::unique_ptr<OptionOpaque>, std::unique_ptr<OptionOpaqueChar>, uint32_t, std::unique_ptr<OptionOpaque>>(), "a"_a,  "b"_a,  "c"_a.none(),  "d"_a)
         .def_prop_rw("a", 

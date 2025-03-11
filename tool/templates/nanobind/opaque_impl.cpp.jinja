@@ -5,6 +5,7 @@
 {% let const_ref = fmt.fmt_borrowed(type_name, Mutability::Immutable) -%}
 {% let move_ref = fmt.fmt_move_ref(type_name) -%}
 {% let full_name = type_name.replace("::", "_") -%}
+{% let auto_define_self_arithmatic = false -%}
 {% include "module_impl.cpp.jinja" %}
 
 PyType_Slot {{full_name}}_slots[] = {

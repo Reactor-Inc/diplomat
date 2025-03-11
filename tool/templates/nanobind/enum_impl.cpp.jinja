@@ -1,4 +1,5 @@
-{% include "module_impl.cpp.jinja" %}
+{%- include "module_impl.cpp.jinja" -%}
+{%- let auto_define_self_arithmatic = true %}
 {
 	nb::class_<{{type_name}}> e_class({{module}}_mod, "{{type_name_unnamespaced}}");
 
