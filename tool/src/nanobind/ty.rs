@@ -32,7 +32,7 @@ struct MethodInfo<'a> {
     /// Qualifiers for the function that come after the declaration (like "const")
     _post_qualifiers: Vec<Cow<'a, str>>,
     /// Type declarations for the C++ parameters
-    param_decls: Vec<NamedType<'a>>,
+    _param_decls: Vec<NamedType<'a>>,
     /// Parameter validations, such as string checks
     _param_validations: Vec<String>,
 }
@@ -274,7 +274,7 @@ impl<'ccx, 'tcx: 'ccx> TyGenContext<'ccx, 'tcx> {
             _abi_name: abi_name,
             pre_qualifiers,
             _post_qualifiers: post_qualifiers,
-            param_decls: param_decls,
+            _param_decls: param_decls,
             _param_validations: Default::default(),
         })
     }
