@@ -22,7 +22,7 @@ namespace capi {
     
     } // extern "C"
 } // namespace capi
-} // namespace
+} // namespace
 
 inline const nested::ns2::capi::Nested* nested::ns2::Nested::AsFFI() const {
   return reinterpret_cast<const nested::ns2::capi::Nested*>(this);
@@ -44,5 +44,5 @@ inline void nested::ns2::Nested::operator delete(void* ptr) {
   nested::ns2::capi::namespace_Nested2_destroy(reinterpret_cast<nested::ns2::capi::Nested*>(ptr));
 }
 
-
+
 #endif // nested_ns2_Nested_HPP

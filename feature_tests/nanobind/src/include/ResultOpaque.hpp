@@ -43,6 +43,9 @@ namespace capi {
     typedef struct ResultOpaque_new_in_enum_err_result {union {diplomat::capi::ErrorEnum ok; diplomat::capi::ResultOpaque* err;}; bool is_ok;} ResultOpaque_new_in_enum_err_result;
     ResultOpaque_new_in_enum_err_result ResultOpaque_new_in_enum_err(int32_t i);
     
+    typedef struct ResultOpaque_new_opaque_lifetime_result {union {const diplomat::capi::ResultOpaque* ok; }; bool is_ok;} ResultOpaque_new_opaque_lifetime_result;
+    ResultOpaque_new_opaque_lifetime_result ResultOpaque_new_opaque_lifetime(const diplomat::capi::ResultOpaque* i);
+    
     diplomat::capi::ResultOpaque* ResultOpaque_takes_str(diplomat::capi::ResultOpaque* self, diplomat::capi::DiplomatStringView _v);
     
     void ResultOpaque_assert_integer(const diplomat::capi::ResultOpaque* self, int32_t i);
@@ -52,7 +55,7 @@ namespace capi {
     
     } // extern "C"
 } // namespace capi
-} // namespace
+} // namespace
 
 inline diplomat::result<std::unique_ptr<ResultOpaque>, ErrorEnum> ResultOpaque::new_(int32_t i) {
   auto result = diplomat::capi::ResultOpaque_new(i);
@@ -94,6 +97,11 @@ inline diplomat::result<ErrorEnum, std::unique_ptr<ResultOpaque>> ResultOpaque::
   return result.is_ok ? diplomat::result<ErrorEnum, std::unique_ptr<ResultOpaque>>(diplomat::Ok<ErrorEnum>(ErrorEnum::FromFFI(result.ok))) : diplomat::result<ErrorEnum, std::unique_ptr<ResultOpaque>>(diplomat::Err<std::unique_ptr<ResultOpaque>>(std::unique_ptr<ResultOpaque>(ResultOpaque::FromFFI(result.err))));
 }
 
+inline diplomat::result<const ResultOpaque&, std::monostate> ResultOpaque::new_opaque_lifetime(const ResultOpaque& i) {
+  auto result = diplomat::capi::ResultOpaque_new_opaque_lifetime(i.AsFFI());
+  return result.is_ok ? diplomat::result<const ResultOpaque&, std::monostate>(diplomat::Ok<const ResultOpaque&>(*ResultOpaque::FromFFI(result.ok))) : diplomat::result<const ResultOpaque&, std::monostate>(diplomat::Err<std::monostate>());
+}
+
 inline diplomat::result<ResultOpaque&, diplomat::Utf8Error> ResultOpaque::takes_str(std::string_view _v) {
   if (!diplomat::capi::diplomat_is_str(_v.data(), _v.size())) {
     return diplomat::Err<diplomat::Utf8Error>();
@@ -128,5 +136,5 @@ inline void ResultOpaque::operator delete(void* ptr) {
   diplomat::capi::ResultOpaque_destroy(reinterpret_cast<diplomat::capi::ResultOpaque*>(ptr));
 }
 
-
+
 #endif // ResultOpaque_HPP

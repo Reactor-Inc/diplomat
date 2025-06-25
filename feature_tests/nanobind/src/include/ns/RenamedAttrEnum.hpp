@@ -20,7 +20,7 @@ namespace capi {
     
     } // extern "C"
 } // namespace capi
-} // namespace
+} // namespace
 
 inline ns::capi::RenamedAttrEnum ns::RenamedAttrEnum::AsFFI() const {
   return static_cast<ns::capi::RenamedAttrEnum>(value);

@@ -22,7 +22,7 @@ namespace capi {
     
     } // extern "C"
 } // namespace capi
-} // namespace
+} // namespace
 
 inline std::string StructWithSlices::return_last() const {
   std::string output;
@@ -47,5 +47,5 @@ inline StructWithSlices StructWithSlices::FromFFI(diplomat::capi::StructWithSlic
   };
 }
 
-
+
 #endif // StructWithSlices_HPP

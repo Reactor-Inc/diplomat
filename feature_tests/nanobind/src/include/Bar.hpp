@@ -25,7 +25,7 @@ namespace capi {
     
     } // extern "C"
 } // namespace capi
-} // namespace
+} // namespace
 
 inline const Foo& Bar::foo() const {
   auto result = diplomat::capi::Bar_foo(this->AsFFI());
@@ -52,5 +52,5 @@ inline void Bar::operator delete(void* ptr) {
   diplomat::capi::Bar_destroy(reinterpret_cast<diplomat::capi::Bar*>(ptr));
 }
 
-
+
 #endif // Bar_HPP

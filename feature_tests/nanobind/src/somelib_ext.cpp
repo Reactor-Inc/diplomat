@@ -323,13 +323,13 @@ NB_MODULE(somelib, somelib_mod)
     					*self = std::move(tmp).ok().value();
     				} else {
     					nb::cast(tmp); // This will raise a python error with the contents of the error type
-    				}}, "a"_a, "b"_a);
+    				}}, "a"_a, "b"_a);
     
     nb::class_<CallbackTestingStruct>(somelib_mod, "CallbackTestingStruct")
         .def(nb::init<>())
         .def(nb::init<int32_t, int32_t>(), "x"_a.none(),  "y"_a.none())
         .def_rw("x", &CallbackTestingStruct::x)
-        .def_rw("y", &CallbackTestingStruct::y);
+        .def_rw("y", &CallbackTestingStruct::y);
     
     nb::class_<CallbackWrapper>(somelib_mod, "CallbackWrapper")
         .def(nb::init<>())
@@ -339,13 +339,13 @@ NB_MODULE(somelib, somelib_mod)
     	.def_static("test_multi_arg_callback", &CallbackWrapper::test_multi_arg_callback, "f"_a, "x"_a)
     	.def_static("test_multiple_cb_args", &CallbackWrapper::test_multiple_cb_args, "f"_a, "g"_a)
     	.def_static("test_no_args", &CallbackWrapper::test_no_args, "h"_a)
-    	.def_static("test_str_cb_arg", &CallbackWrapper::test_str_cb_arg, "f"_a);
+    	.def_static("test_str_cb_arg", &CallbackWrapper::test_str_cb_arg, "f"_a);
     
     nb::class_<ImportedStruct>(somelib_mod, "ImportedStruct")
         .def(nb::init<>())
         .def(nb::init<UnimportedEnum, uint8_t>(), "foo"_a.none(),  "count"_a.none())
         .def_rw("foo", &ImportedStruct::foo)
-        .def_rw("count", &ImportedStruct::count);
+        .def_rw("count", &ImportedStruct::count);
     
     nb::class_<BorrowedFields>(somelib_mod, "BorrowedFields")
         .def(nb::init<>())
@@ -353,12 +353,12 @@ NB_MODULE(somelib, somelib_mod)
         .def_rw("a", &BorrowedFields::a)
         .def_rw("b", &BorrowedFields::b)
         .def_rw("c", &BorrowedFields::c)
-    	.def_static("from_bar_and_strings", &BorrowedFields::from_bar_and_strings, "bar"_a, "dstr16"_a, "utf8_str"_a, nb::keep_alive<0, 1>(), nb::keep_alive<0, 2>(), nb::keep_alive<0, 3>());
+    	.def_static("from_bar_and_strings", &BorrowedFields::from_bar_and_strings, "bar"_a, "dstr16"_a, "utf8_str"_a, nb::keep_alive<0, 1>(), nb::keep_alive<0, 2>(), nb::keep_alive<0, 3>());
     
     nb::class_<BorrowedFieldsReturning>(somelib_mod, "BorrowedFieldsReturning")
         .def(nb::init<>())
         .def(nb::init<std::string_view>(), "bytes"_a.none())
-        .def_rw("bytes", &BorrowedFieldsReturning::bytes);
+        .def_rw("bytes", &BorrowedFieldsReturning::bytes);
     
     nb::class_<BorrowedFieldsWithBounds>(somelib_mod, "BorrowedFieldsWithBounds")
         .def(nb::init<>())
@@ -366,7 +366,7 @@ NB_MODULE(somelib, somelib_mod)
         .def_rw("field_a", &BorrowedFieldsWithBounds::field_a)
         .def_rw("field_b", &BorrowedFieldsWithBounds::field_b)
         .def_rw("field_c", &BorrowedFieldsWithBounds::field_c)
-    	.def_static("from_foo_and_strings", &BorrowedFieldsWithBounds::from_foo_and_strings, "foo"_a, "dstr16_x"_a, "utf8_str_z"_a, nb::keep_alive<0, 1>(), nb::keep_alive<0, 2>(), nb::keep_alive<0, 3>());
+    	.def_static("from_foo_and_strings", &BorrowedFieldsWithBounds::from_foo_and_strings, "foo"_a, "dstr16_x"_a, "utf8_str_z"_a, nb::keep_alive<0, 1>(), nb::keep_alive<0, 2>(), nb::keep_alive<0, 3>());
     
     nb::class_<NestedBorrowedFields>(somelib_mod, "NestedBorrowedFields")
         .def(nb::init<>())
@@ -374,20 +374,20 @@ NB_MODULE(somelib, somelib_mod)
         .def_rw("fields", &NestedBorrowedFields::fields)
         .def_rw("bounds", &NestedBorrowedFields::bounds)
         .def_rw("bounds2", &NestedBorrowedFields::bounds2)
-    	.def_static("from_bar_and_foo_and_strings", &NestedBorrowedFields::from_bar_and_foo_and_strings, "bar"_a, "foo"_a, "dstr16_x"_a, "dstr16_z"_a, "utf8_str_y"_a, "utf8_str_z"_a, nb::keep_alive<0, 1>(), nb::keep_alive<0, 2>(), nb::keep_alive<0, 3>(), nb::keep_alive<0, 4>(), nb::keep_alive<0, 5>(), nb::keep_alive<0, 6>());
+    	.def_static("from_bar_and_foo_and_strings", &NestedBorrowedFields::from_bar_and_foo_and_strings, "bar"_a, "foo"_a, "dstr16_x"_a, "dstr16_z"_a, "utf8_str_y"_a, "utf8_str_z"_a, nb::keep_alive<0, 1>(), nb::keep_alive<0, 2>(), nb::keep_alive<0, 3>(), nb::keep_alive<0, 4>(), nb::keep_alive<0, 5>(), nb::keep_alive<0, 6>());
     
     nb::class_<OptionInputStruct>(somelib_mod, "OptionInputStruct")
         .def(nb::init<>())
         .def(nb::init<std::optional<uint8_t>, std::optional<char32_t>, std::optional<OptionEnum>>(), "a"_a.none(),  "b"_a.none(),  "c"_a.none())
         .def_rw("a", &OptionInputStruct::a)
         .def_rw("b", &OptionInputStruct::b)
-        .def_rw("c", &OptionInputStruct::c);
+        .def_rw("c", &OptionInputStruct::c);
     
     nb::class_<ErrorStruct>(somelib_mod, "ErrorStruct")
         .def(nb::init<>())
         .def(nb::init<int32_t, int32_t>(), "i"_a.none(),  "j"_a.none())
         .def_rw("i", &ErrorStruct::i)
-        .def_rw("j", &ErrorStruct::j);
+        .def_rw("j", &ErrorStruct::j);
     
     nb::class_<CyclicStructA>(somelib_mod, "CyclicStructA")
         .def(nb::init<>())
@@ -396,21 +396,21 @@ NB_MODULE(somelib, somelib_mod)
     	.def("cyclic_out", &CyclicStructA::cyclic_out)
     	.def("double_cyclic_out", &CyclicStructA::double_cyclic_out, "cyclic_struct_a"_a)
     	.def_static("get_b", &CyclicStructA::get_b)
-    	.def_prop_ro("getter_out", &CyclicStructA::getter_out);
+    	.def_prop_ro("getter_out", &CyclicStructA::getter_out);
     
     nb::class_<CyclicStructB>(somelib_mod, "CyclicStructB")
         .def(nb::init<>())
         .def(nb::init<uint8_t>(), "field"_a.none())
         .def_rw("field", &CyclicStructB::field)
     	.def_static("get_a", &CyclicStructB::get_a)
-    	.def_static("get_a_option", &CyclicStructB::get_a_option);
+    	.def_static("get_a_option", &CyclicStructB::get_a_option);
     
     nb::class_<CyclicStructC>(somelib_mod, "CyclicStructC")
         .def(nb::init<>())
         .def(nb::init<CyclicStructA>(), "a"_a.none())
         .def_rw("a", &CyclicStructC::a)
     	.def("cyclic_out", &CyclicStructC::cyclic_out)
-    	.def_static("takes_nested_parameters", &CyclicStructC::takes_nested_parameters, "c"_a);
+    	.def_static("takes_nested_parameters", &CyclicStructC::takes_nested_parameters, "c"_a);
     
     nb::class_<MyStruct>(somelib_mod, "MyStruct")
         .def_rw("a", &MyStruct::a)
@@ -423,16 +423,16 @@ NB_MODULE(somelib, somelib_mod)
     	.def_static("fails_zst_result", &MyStruct::fails_zst_result)
     	.def("into_a", &MyStruct::into_a)
     	.def("__init__", [](MyStruct* self){ *self = MyStruct::new_(); })
-    	.def_static("returns_zst_result", &MyStruct::returns_zst_result);
+    	.def_static("returns_zst_result", &MyStruct::returns_zst_result);
     
     nb::class_<MyStructContainingAnOption>(somelib_mod, "MyStructContainingAnOption")
         .def_rw("a", &MyStructContainingAnOption::a)
         .def_rw("b", &MyStructContainingAnOption::b)
     	.def_static("filled", &MyStructContainingAnOption::filled)
-    	.def("__init__", [](MyStructContainingAnOption* self){ *self = MyStructContainingAnOption::new_(); });
+    	.def("__init__", [](MyStructContainingAnOption* self){ *self = MyStructContainingAnOption::new_(); });
     
     nb::class_<MyZst>(somelib_mod, "MyZst")
-        .def(nb::init<>());
+        .def(nb::init<>());
     
     nb::class_<StructArithmetic>(somelib_mod, "StructArithmetic")
         .def_rw("x", &StructArithmetic::x)
@@ -444,14 +444,14 @@ NB_MODULE(somelib, somelib_mod)
     	.def(nb::self / nb::self)
     	.def(nb::self * nb::self)
     	.def("__init__", [](StructArithmetic* self, int32_t x, int32_t y){ *self = StructArithmetic::new_(x, y); }, "x"_a, "y"_a)
-    	.def(nb::self - nb::self);
+    	.def(nb::self - nb::self);
     
     nb::class_<StructWithSlices>(somelib_mod, "StructWithSlices")
         .def(nb::init<>())
         .def(nb::init<std::string_view, diplomat::span<const uint16_t>>(), "first"_a.none(),  "second"_a.none())
         .def_rw("first", &StructWithSlices::first)
         .def_rw("second", &StructWithSlices::second)
-    	.def("return_last", &StructWithSlices::return_last);
+    	.def("return_last", &StructWithSlices::return_last);
     
     nb::class_<OptionStruct>(somelib_mod, "OptionStruct")
         .def(nb::init<>())
@@ -468,7 +468,7 @@ NB_MODULE(somelib, somelib_mod)
         .def_prop_rw("d", 
             [](const OptionStruct& self) { return self.d.get(); },
             [](OptionStruct& self, std::unique_ptr<OptionOpaque>&& v) { self.d = std::move(v); }
-        );
+        );
     
     PyType_Slot ns_AttrOpaque1Renamed_slots[] = {
         {Py_tp_free, (void *)ns::AttrOpaque1Renamed::operator delete },
@@ -746,6 +746,7 @@ NB_MODULE(somelib, somelib_mod)
     	.def_static("new_in_enum_err", &ResultOpaque::new_in_enum_err, "i"_a)
     	.def_static("new_in_err", &ResultOpaque::new_in_err, "i"_a)
     	.def_static("new_int", &ResultOpaque::new_int, "i"_a)
+    	.def_static("new_opaque_lifetime", &ResultOpaque::new_opaque_lifetime, "i"_a, nb::keep_alive<0, 1>(), nb::rv_policy::reference)
     	.def("takes_str", &ResultOpaque::takes_str, "_v"_a, nb::keep_alive<0, 1>(), nb::rv_policy::reference);
     
     PyType_Slot RefList_slots[] = {
@@ -864,7 +865,7 @@ NB_MODULE(somelib, somelib_mod)
     			return nb::str(nb::cast(ns::RenamedAttrEnum::Value(self)));
     		});
     }
-    
+    
     {
     	nb::class_<UnimportedEnum> e_class(somelib_mod, "UnimportedEnum");
     
@@ -881,7 +882,7 @@ NB_MODULE(somelib, somelib_mod)
     			return nb::str(nb::cast(UnimportedEnum::Value(self)));
     		});
     }
-    
+    
     {
     	nb::class_<OptionEnum> e_class(somelib_mod, "OptionEnum");
     
@@ -897,7 +898,7 @@ NB_MODULE(somelib, somelib_mod)
     			return nb::str(nb::cast(OptionEnum::Value(self)));
     		});
     }
-    
+    
     {
     	nb::class_<ErrorEnum> e_class(somelib_mod, "ErrorEnum");
     
@@ -913,7 +914,7 @@ NB_MODULE(somelib, somelib_mod)
     			return nb::str(nb::cast(ErrorEnum::Value(self)));
     		});
     }
-    
+    
     {
     	nb::class_<ContiguousEnum> e_class(somelib_mod, "ContiguousEnum");
     
@@ -931,7 +932,7 @@ NB_MODULE(somelib, somelib_mod)
     			return nb::str(nb::cast(ContiguousEnum::Value(self)));
     		});
     }
-    
+    
     {
     	nb::class_<DefaultEnum> e_class(somelib_mod, "DefaultEnum");
     
@@ -947,7 +948,7 @@ NB_MODULE(somelib, somelib_mod)
     			return nb::str(nb::cast(DefaultEnum::Value(self)));
     		});
     }
-    
+    
     {
     	nb::class_<MyEnum> e_class(somelib_mod, "MyEnum");
     
@@ -967,4 +968,5 @@ NB_MODULE(somelib, somelib_mod)
     			return nb::str(nb::cast(MyEnum::Value(self)));
     		});
     }
-}
+    
+}

@@ -38,7 +38,7 @@ namespace capi {
     
     } // extern "C"
 } // namespace capi
-} // namespace
+} // namespace
 
 inline std::unique_ptr<Foo> Foo::new_(std::string_view x) {
   auto result = diplomat::capi::Foo_new({x.data(), x.size()});
@@ -91,5 +91,5 @@ inline void Foo::operator delete(void* ptr) {
   diplomat::capi::Foo_destroy(reinterpret_cast<diplomat::capi::Foo*>(ptr));
 }
 
-
+
 #endif // Foo_HPP

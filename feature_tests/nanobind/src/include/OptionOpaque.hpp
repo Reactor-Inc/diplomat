@@ -73,7 +73,7 @@ namespace capi {
     
     } // extern "C"
 } // namespace capi
-} // namespace
+} // namespace
 
 inline std::unique_ptr<OptionOpaque> OptionOpaque::new_(int32_t i) {
   auto result = diplomat::capi::OptionOpaque_new(i);
@@ -201,5 +201,5 @@ inline void OptionOpaque::operator delete(void* ptr) {
   diplomat::capi::OptionOpaque_destroy(reinterpret_cast<diplomat::capi::OptionOpaque*>(ptr));
 }
 
-
+
 #endif // OptionOpaque_HPP

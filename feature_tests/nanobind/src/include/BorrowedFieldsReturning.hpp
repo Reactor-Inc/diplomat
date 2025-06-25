@@ -20,7 +20,7 @@ namespace capi {
     
     } // extern "C"
 } // namespace capi
-} // namespace
+} // namespace
 
 
 inline diplomat::capi::BorrowedFieldsReturning BorrowedFieldsReturning::AsFFI() const {
@@ -35,5 +35,5 @@ inline BorrowedFieldsReturning BorrowedFieldsReturning::FromFFI(diplomat::capi::
   };
 }
 
-
+
 #endif // BorrowedFieldsReturning_HPP

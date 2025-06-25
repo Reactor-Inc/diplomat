@@ -15,7 +15,7 @@ namespace diplomat {
 namespace capi {
     struct Two;
 } // namespace capi
-} // namespace
+} // namespace
 
 class Two {
 public:
@@ -34,5 +34,5 @@ private:
   static void operator delete[](void*, size_t) = delete;
 };
 
-
+
 #endif // Two_D_HPP

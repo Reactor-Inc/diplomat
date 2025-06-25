@@ -24,7 +24,7 @@ namespace capi {
     
     typedef struct BorrowedFieldsWithBounds_option {union { BorrowedFieldsWithBounds ok; }; bool is_ok; } BorrowedFieldsWithBounds_option;
 } // namespace capi
-} // namespace
+} // namespace
 
 
 struct BorrowedFieldsWithBounds {
@@ -38,5 +38,5 @@ struct BorrowedFieldsWithBounds {
   inline static BorrowedFieldsWithBounds FromFFI(diplomat::capi::BorrowedFieldsWithBounds c_struct);
 };
 
-
+
 #endif // BorrowedFieldsWithBounds_D_HPP

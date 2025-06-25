@@ -15,7 +15,7 @@ namespace diplomat {
 namespace capi {
     struct MyOpaqueEnum;
 } // namespace capi
-} // namespace
+} // namespace
 
 class MyOpaqueEnum {
 public:
@@ -38,5 +38,5 @@ private:
   static void operator delete[](void*, size_t) = delete;
 };
 
-
+
 #endif // MyOpaqueEnum_D_HPP

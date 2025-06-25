@@ -26,7 +26,7 @@ namespace capi {
     
     } // extern "C"
 } // namespace capi
-} // namespace
+} // namespace
 
 inline std::unique_ptr<MyOpaqueEnum> MyOpaqueEnum::new_() {
   auto result = diplomat::capi::MyOpaqueEnum_new();
@@ -61,5 +61,5 @@ inline void MyOpaqueEnum::operator delete(void* ptr) {
   diplomat::capi::MyOpaqueEnum_destroy(reinterpret_cast<diplomat::capi::MyOpaqueEnum*>(ptr));
 }
 
-
+
 #endif // MyOpaqueEnum_HPP

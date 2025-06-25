@@ -20,7 +20,7 @@ namespace capi {
     
     typedef struct StructWithSlices_option {union { StructWithSlices ok; }; bool is_ok; } StructWithSlices_option;
 } // namespace capi
-} // namespace
+} // namespace
 
 
 struct StructWithSlices {
@@ -33,5 +33,5 @@ struct StructWithSlices {
   inline static StructWithSlices FromFFI(diplomat::capi::StructWithSlices c_struct);
 };
 
-
+
 #endif // StructWithSlices_D_HPP

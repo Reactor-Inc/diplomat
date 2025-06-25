@@ -22,7 +22,7 @@ namespace capi {
     
     } // extern "C"
 } // namespace capi
-} // namespace
+} // namespace
 
 inline const diplomat::capi::Two* Two::AsFFI() const {
   return reinterpret_cast<const diplomat::capi::Two*>(this);
@@ -44,5 +44,5 @@ inline void Two::operator delete(void* ptr) {
   diplomat::capi::Two_destroy(reinterpret_cast<diplomat::capi::Two*>(ptr));
 }
 
-
+
 #endif // Two_HPP

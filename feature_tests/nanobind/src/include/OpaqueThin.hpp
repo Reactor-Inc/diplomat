@@ -26,7 +26,7 @@ namespace capi {
     
     } // extern "C"
 } // namespace capi
-} // namespace
+} // namespace
 
 inline int32_t OpaqueThin::a() const {
   auto result = diplomat::capi::OpaqueThin_a(this->AsFFI());
@@ -58,5 +58,5 @@ inline void OpaqueThin::operator delete(void* ptr) {
   diplomat::capi::OpaqueThin_destroy(reinterpret_cast<diplomat::capi::OpaqueThin*>(ptr));
 }
 
-
+
 #endif // OpaqueThin_HPP

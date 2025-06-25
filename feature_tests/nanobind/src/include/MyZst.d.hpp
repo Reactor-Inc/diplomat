@@ -15,12 +15,12 @@ namespace diplomat {
 namespace capi {
     
 } // namespace capi
-} // namespace
+} // namespace
 
 
 struct MyZst {
 
 };
 
-
+
 #endif // MyZst_D_HPP

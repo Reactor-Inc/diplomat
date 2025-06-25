@@ -29,7 +29,7 @@ namespace capi {
     
     typedef struct MyStruct_option {union { MyStruct ok; }; bool is_ok; } MyStruct_option;
 } // namespace capi
-} // namespace
+} // namespace
 
 
 struct MyStruct {
@@ -53,5 +53,5 @@ struct MyStruct {
   inline static MyStruct FromFFI(diplomat::capi::MyStruct c_struct);
 };
 
-
+
 #endif // MyStruct_D_HPP

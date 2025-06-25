@@ -15,7 +15,7 @@ namespace ns {
 namespace capi {
     struct RenamedMyIterator;
 } // namespace capi
-} // namespace
+} // namespace
 
 namespace ns {
 class RenamedMyIterator {
@@ -37,5 +37,5 @@ private:
   static void operator delete[](void*, size_t) = delete;
 };
 
-} // namespace
+} // namespace
 #endif // ns_RenamedMyIterator_D_HPP

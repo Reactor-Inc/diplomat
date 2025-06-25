@@ -25,7 +25,7 @@ namespace capi {
     
     } // extern "C"
 } // namespace capi
-} // namespace
+} // namespace
 
 inline diplomat::result<ns::RenamedStructWithAttrs, std::monostate> ns::RenamedStructWithAttrs::new_fallible(bool a, uint32_t b) {
   auto result = ns::capi::namespace_StructWithAttrs_new_fallible(a,
@@ -53,5 +53,5 @@ inline ns::RenamedStructWithAttrs ns::RenamedStructWithAttrs::FromFFI(ns::capi::
   };
 }
 
-
+
 #endif // ns_RenamedStructWithAttrs_HPP

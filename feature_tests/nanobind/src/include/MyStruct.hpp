@@ -32,7 +32,7 @@ namespace capi {
     
     } // extern "C"
 } // namespace capi
-} // namespace
+} // namespace
 
 inline MyStruct MyStruct::new_() {
   auto result = diplomat::capi::MyStruct_new();
@@ -79,5 +79,5 @@ inline MyStruct MyStruct::FromFFI(diplomat::capi::MyStruct c_struct) {
   };
 }
 
-
+
 #endif // MyStruct_HPP

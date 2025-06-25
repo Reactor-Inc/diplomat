@@ -20,7 +20,7 @@ namespace capi {
     
     typedef struct CallbackTestingStruct_option {union { CallbackTestingStruct ok; }; bool is_ok; } CallbackTestingStruct_option;
 } // namespace capi
-} // namespace
+} // namespace
 
 
 struct CallbackTestingStruct {
@@ -31,5 +31,5 @@ struct CallbackTestingStruct {
   inline static CallbackTestingStruct FromFFI(diplomat::capi::CallbackTestingStruct c_struct);
 };
 
-
+
 #endif // CallbackTestingStruct_D_HPP

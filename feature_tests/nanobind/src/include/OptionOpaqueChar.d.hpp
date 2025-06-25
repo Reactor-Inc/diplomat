@@ -15,7 +15,7 @@ namespace diplomat {
 namespace capi {
     struct OptionOpaqueChar;
 } // namespace capi
-} // namespace
+} // namespace
 
 class OptionOpaqueChar {
 public:
@@ -36,5 +36,5 @@ private:
   static void operator delete[](void*, size_t) = delete;
 };
 
-
+
 #endif // OptionOpaqueChar_D_HPP

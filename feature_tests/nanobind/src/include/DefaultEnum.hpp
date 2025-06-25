@@ -22,7 +22,7 @@ namespace capi {
     
     } // extern "C"
 } // namespace capi
-} // namespace
+} // namespace
 
 inline diplomat::capi::DefaultEnum DefaultEnum::AsFFI() const {
   return static_cast<diplomat::capi::DefaultEnum>(value);

@@ -20,7 +20,7 @@ namespace capi {
     
     typedef struct ErrorStruct_option {union { ErrorStruct ok; }; bool is_ok; } ErrorStruct_option;
 } // namespace capi
-} // namespace
+} // namespace
 
 
 struct ErrorStruct {
@@ -31,5 +31,5 @@ struct ErrorStruct {
   inline static ErrorStruct FromFFI(diplomat::capi::ErrorStruct c_struct);
 };
 
-
+
 #endif // ErrorStruct_D_HPP

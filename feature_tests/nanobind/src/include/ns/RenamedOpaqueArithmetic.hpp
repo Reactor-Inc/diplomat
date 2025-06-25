@@ -44,7 +44,7 @@ namespace capi {
     
     } // extern "C"
 } // namespace capi
-} // namespace
+} // namespace
 
 inline std::unique_ptr<ns::RenamedOpaqueArithmetic> ns::RenamedOpaqueArithmetic::make(int32_t x, int32_t y) {
   auto result = ns::capi::namespace_OpaqueArithmetic_make(x,
@@ -126,5 +126,5 @@ inline void ns::RenamedOpaqueArithmetic::operator delete(void* ptr) {
   ns::capi::namespace_OpaqueArithmetic_destroy(reinterpret_cast<ns::capi::RenamedOpaqueArithmetic*>(ptr));
 }
 
-
+
 #endif // ns_RenamedOpaqueArithmetic_HPP

@@ -18,7 +18,7 @@ namespace diplomat {
 namespace capi {
     struct ResultOpaque;
 } // namespace capi
-} // namespace
+} // namespace
 
 class ResultOpaque {
 public:
@@ -38,6 +38,8 @@ public:
   inline static diplomat::result<int32_t, std::monostate> new_int(int32_t i);
 
   inline static diplomat::result<ErrorEnum, std::unique_ptr<ResultOpaque>> new_in_enum_err(int32_t i);
+
+  inline static diplomat::result<const ResultOpaque&, std::monostate> new_opaque_lifetime(const ResultOpaque& i);
 
   /**
    * When we take &str, the return type becomes a Result
@@ -61,5 +63,5 @@ private:
   static void operator delete[](void*, size_t) = delete;
 };
 
-
+
 #endif // ResultOpaque_D_HPP

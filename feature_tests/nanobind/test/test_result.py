@@ -35,4 +35,8 @@ class TestResult(unittest.TestCase):
         #cm.exception.assert_integer(198)
         assert(str(cm.exception).startswith("<somelib.somelib.ResultOpaque"))
 
+        op = somelib.ResultOpaque(4021)
+        ref = somelib.ResultOpaque.new_opaque_lifetime(op)
+        op.assert_integer(4021)
+        ref.assert_integer(4021)
 

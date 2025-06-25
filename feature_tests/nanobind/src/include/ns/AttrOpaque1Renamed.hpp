@@ -34,7 +34,7 @@ namespace capi {
     
     } // extern "C"
 } // namespace capi
-} // namespace
+} // namespace
 
 inline std::unique_ptr<ns::AttrOpaque1Renamed> ns::AttrOpaque1Renamed::totally_not_new() {
   auto result = ns::capi::namespace_AttrOpaque1_new();
@@ -81,5 +81,5 @@ inline void ns::AttrOpaque1Renamed::operator delete(void* ptr) {
   ns::capi::namespace_AttrOpaque1_destroy(reinterpret_cast<ns::capi::AttrOpaque1Renamed*>(ptr));
 }
 
-
+
 #endif // ns_AttrOpaque1Renamed_HPP

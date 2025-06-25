@@ -15,7 +15,7 @@ namespace diplomat {
 namespace capi {
     struct OpaqueThin;
 } // namespace capi
-} // namespace
+} // namespace
 
 class OpaqueThin {
 public:
@@ -38,5 +38,5 @@ private:
   static void operator delete[](void*, size_t) = delete;
 };
 
-
+
 #endif // OpaqueThin_D_HPP

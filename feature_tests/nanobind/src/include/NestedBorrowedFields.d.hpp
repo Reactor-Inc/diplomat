@@ -30,7 +30,7 @@ namespace capi {
     
     typedef struct NestedBorrowedFields_option {union { NestedBorrowedFields ok; }; bool is_ok; } NestedBorrowedFields_option;
 } // namespace capi
-} // namespace
+} // namespace
 
 
 struct NestedBorrowedFields {
@@ -44,5 +44,5 @@ struct NestedBorrowedFields {
   inline static NestedBorrowedFields FromFFI(diplomat::capi::NestedBorrowedFields c_struct);
 };
 
-
+
 #endif // NestedBorrowedFields_D_HPP

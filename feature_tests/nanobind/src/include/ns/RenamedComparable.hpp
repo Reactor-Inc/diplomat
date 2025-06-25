@@ -26,7 +26,7 @@ namespace capi {
     
     } // extern "C"
 } // namespace capi
-} // namespace
+} // namespace
 
 inline std::unique_ptr<ns::RenamedComparable> ns::RenamedComparable::new_(uint8_t int_) {
   auto result = ns::capi::namespace_Comparable_new(int_);
@@ -82,5 +82,5 @@ inline void ns::RenamedComparable::operator delete(void* ptr) {
   ns::capi::namespace_Comparable_destroy(reinterpret_cast<ns::capi::RenamedComparable*>(ptr));
 }
 
-
+
 #endif // ns_RenamedComparable_HPP

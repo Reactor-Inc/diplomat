@@ -40,7 +40,7 @@ namespace capi {
     
     } // extern "C"
 } // namespace capi
-} // namespace
+} // namespace
 
 inline std::unique_ptr<MyString> MyString::new_(std::string_view v) {
   auto result = diplomat::capi::MyString_new({v.data(), v.size()});
@@ -119,5 +119,5 @@ inline void MyString::operator delete(void* ptr) {
   diplomat::capi::MyString_destroy(reinterpret_cast<diplomat::capi::MyString*>(ptr));
 }
 
-
+
 #endif // MyString_HPP

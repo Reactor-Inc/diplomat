@@ -25,7 +25,7 @@ namespace capi {
     
     } // extern "C"
 } // namespace capi
-} // namespace
+} // namespace
 
 inline const OpaqueThin* OpaqueThinIter::next() {
   auto result = diplomat::capi::OpaqueThinIter_next(this->AsFFI());
@@ -52,5 +52,5 @@ inline void OpaqueThinIter::operator delete(void* ptr) {
   diplomat::capi::OpaqueThinIter_destroy(reinterpret_cast<diplomat::capi::OpaqueThinIter*>(ptr));
 }
 
-
+
 #endif // OpaqueThinIter_HPP

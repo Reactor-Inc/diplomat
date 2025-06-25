@@ -23,7 +23,7 @@ namespace capi {
     
     } // extern "C"
 } // namespace capi
-} // namespace
+} // namespace
 
 inline diplomat::result<BorrowedFieldsWithBounds, diplomat::Utf8Error> BorrowedFieldsWithBounds::from_foo_and_strings(const Foo& foo, std::u16string_view dstr16_x, std::string_view utf8_str_z) {
   if (!diplomat::capi::diplomat_is_str(utf8_str_z.data(), utf8_str_z.size())) {
@@ -52,5 +52,5 @@ inline BorrowedFieldsWithBounds BorrowedFieldsWithBounds::FromFFI(diplomat::capi
   };
 }
 
-
+
 #endif // BorrowedFieldsWithBounds_HPP

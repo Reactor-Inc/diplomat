@@ -28,7 +28,7 @@ namespace capi {
     
     } // extern "C"
 } // namespace capi
-} // namespace
+} // namespace
 
 inline std::unique_ptr<Utf16Wrap> Utf16Wrap::from_utf16(std::u16string_view input) {
   auto result = diplomat::capi::Utf16Wrap_from_utf16({input.data(), input.size()});
@@ -68,5 +68,5 @@ inline void Utf16Wrap::operator delete(void* ptr) {
   diplomat::capi::Utf16Wrap_destroy(reinterpret_cast<diplomat::capi::Utf16Wrap*>(ptr));
 }
 
-
+
 #endif // Utf16Wrap_HPP

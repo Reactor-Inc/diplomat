@@ -22,7 +22,7 @@ namespace capi {
     
     } // extern "C"
 } // namespace capi
-} // namespace
+} // namespace
 
 inline const diplomat::capi::RefListParameter* RefListParameter::AsFFI() const {
   return reinterpret_cast<const diplomat::capi::RefListParameter*>(this);
@@ -44,5 +44,5 @@ inline void RefListParameter::operator delete(void* ptr) {
   diplomat::capi::RefListParameter_destroy(reinterpret_cast<diplomat::capi::RefListParameter*>(ptr));
 }
 
-
+
 #endif // RefListParameter_HPP

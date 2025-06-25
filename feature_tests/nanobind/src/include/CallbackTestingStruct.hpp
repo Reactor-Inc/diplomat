@@ -20,7 +20,7 @@ namespace capi {
     
     } // extern "C"
 } // namespace capi
-} // namespace
+} // namespace
 
 
 inline diplomat::capi::CallbackTestingStruct CallbackTestingStruct::AsFFI() const {
@@ -37,5 +37,5 @@ inline CallbackTestingStruct CallbackTestingStruct::FromFFI(diplomat::capi::Call
   };
 }
 
-
+
 #endif // CallbackTestingStruct_HPP

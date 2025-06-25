@@ -22,7 +22,7 @@ namespace capi {
     
     typedef struct CyclicStructC_option {union { CyclicStructC ok; }; bool is_ok; } CyclicStructC_option;
 } // namespace capi
-} // namespace
+} // namespace
 
 
 struct CyclicStructC {
@@ -36,5 +36,5 @@ struct CyclicStructC {
   inline static CyclicStructC FromFFI(diplomat::capi::CyclicStructC c_struct);
 };
 
-
+
 #endif // CyclicStructC_D_HPP

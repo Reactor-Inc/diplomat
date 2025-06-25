@@ -21,7 +21,7 @@ namespace capi {
     
     typedef struct RenamedAttrEnum_option {union { RenamedAttrEnum ok; }; bool is_ok; } RenamedAttrEnum_option;
 } // namespace capi
-} // namespace
+} // namespace
 
 namespace ns {
 class RenamedAttrEnum {
@@ -45,5 +45,5 @@ private:
     Value value;
 };
 
-} // namespace
+} // namespace
 #endif // ns_RenamedAttrEnum_D_HPP

@@ -20,7 +20,7 @@ namespace diplomat {
 namespace capi {
     struct OpaqueThinVec;
 } // namespace capi
-} // namespace
+} // namespace
 
 class OpaqueThinVec {
 public:
@@ -51,5 +51,5 @@ private:
   static void operator delete[](void*, size_t) = delete;
 };
 
-
+
 #endif // OpaqueThinVec_D_HPP

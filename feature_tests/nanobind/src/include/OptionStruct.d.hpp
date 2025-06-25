@@ -27,7 +27,7 @@ namespace capi {
     
     typedef struct OptionStruct_option {union { OptionStruct ok; }; bool is_ok; } OptionStruct_option;
 } // namespace capi
-} // namespace
+} // namespace
 
 
 struct OptionStruct {
@@ -40,5 +40,5 @@ struct OptionStruct {
   inline static OptionStruct FromFFI(diplomat::capi::OptionStruct c_struct);
 };
 
-
+
 #endif // OptionStruct_D_HPP

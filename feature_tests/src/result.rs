@@ -62,6 +62,10 @@ pub mod ffi {
             Err(Box::new(ResultOpaque(i)))
         }
 
+        pub fn new_opaque_lifetime<'a>(i: &'a ResultOpaque) -> Result<&'a ResultOpaque, ()> {
+            Ok(i)
+        }
+
         /// When we take &str, the return type becomes a Result
         /// Test that this interacts gracefully with returning a reference type
         pub fn takes_str<'a>(&'a mut self, _v: &str) -> &'a mut Self {

@@ -15,7 +15,7 @@ namespace ns {
 namespace capi {
     struct RenamedAttrOpaque2;
 } // namespace capi
-} // namespace
+} // namespace
 
 namespace ns {
 class RenamedAttrOpaque2 {
@@ -35,5 +35,5 @@ private:
   static void operator delete[](void*, size_t) = delete;
 };
 
-} // namespace
+} // namespace
 #endif // ns_RenamedAttrOpaque2_D_HPP

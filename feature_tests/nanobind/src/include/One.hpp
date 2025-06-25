@@ -45,7 +45,7 @@ namespace capi {
     
     } // extern "C"
 } // namespace capi
-} // namespace
+} // namespace
 
 inline std::unique_ptr<One> One::transitivity(const One& hold, const One& nohold) {
   auto result = diplomat::capi::One_transitivity(hold.AsFFI(),
@@ -150,5 +150,5 @@ inline void One::operator delete(void* ptr) {
   diplomat::capi::One_destroy(reinterpret_cast<diplomat::capi::One*>(ptr));
 }
 
-
+
 #endif // One_HPP

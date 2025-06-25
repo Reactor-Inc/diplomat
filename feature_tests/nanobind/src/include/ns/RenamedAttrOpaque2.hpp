@@ -22,7 +22,7 @@ namespace capi {
     
     } // extern "C"
 } // namespace capi
-} // namespace
+} // namespace
 
 inline const ns::capi::RenamedAttrOpaque2* ns::RenamedAttrOpaque2::AsFFI() const {
   return reinterpret_cast<const ns::capi::RenamedAttrOpaque2*>(this);
@@ -44,5 +44,5 @@ inline void ns::RenamedAttrOpaque2::operator delete(void* ptr) {
   ns::capi::namespace_AttrOpaque2_destroy(reinterpret_cast<ns::capi::RenamedAttrOpaque2*>(ptr));
 }
 
-
+
 #endif // ns_RenamedAttrOpaque2_HPP

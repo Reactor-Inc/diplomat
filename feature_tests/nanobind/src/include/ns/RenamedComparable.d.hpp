@@ -20,7 +20,7 @@ namespace ns {
 namespace capi {
     struct RenamedComparable;
 } // namespace capi
-} // namespace
+} // namespace
 
 namespace ns {
 class RenamedComparable {
@@ -50,5 +50,5 @@ private:
   static void operator delete[](void*, size_t) = delete;
 };
 
-} // namespace
+} // namespace
 #endif // ns_RenamedComparable_D_HPP

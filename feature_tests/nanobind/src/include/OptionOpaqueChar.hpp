@@ -24,7 +24,7 @@ namespace capi {
     
     } // extern "C"
 } // namespace capi
-} // namespace
+} // namespace
 
 inline void OptionOpaqueChar::assert_char(char32_t ch) const {
   diplomat::capi::OptionOpaqueChar_assert_char(this->AsFFI(),
@@ -51,5 +51,5 @@ inline void OptionOpaqueChar::operator delete(void* ptr) {
   diplomat::capi::OptionOpaqueChar_destroy(reinterpret_cast<diplomat::capi::OptionOpaqueChar*>(ptr));
 }
 
-
+
 #endif // OptionOpaqueChar_HPP

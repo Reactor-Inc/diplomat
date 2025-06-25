@@ -20,7 +20,7 @@ namespace capi {
     
     typedef struct OptionEnum_option {union { OptionEnum ok; }; bool is_ok; } OptionEnum_option;
 } // namespace capi
-} // namespace
+} // namespace
 
 class OptionEnum {
 public:
@@ -42,5 +42,5 @@ private:
     Value value;
 };
 
-
+
 #endif // OptionEnum_D_HPP

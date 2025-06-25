@@ -26,7 +26,7 @@ namespace capi {
     
     } // extern "C"
 } // namespace capi
-} // namespace
+} // namespace
 
 inline MyStructContainingAnOption MyStructContainingAnOption::new_() {
   auto result = diplomat::capi::MyStructContainingAnOption_new();
@@ -53,5 +53,5 @@ inline MyStructContainingAnOption MyStructContainingAnOption::FromFFI(diplomat::
   };
 }
 
-
+
 #endif // MyStructContainingAnOption_HPP

@@ -30,7 +30,7 @@ namespace capi {
     
     } // extern "C"
 } // namespace capi
-} // namespace
+} // namespace
 
 inline std::unique_ptr<OptionString> OptionString::new_(std::string_view diplomat_str) {
   auto result = diplomat::capi::OptionString_new({diplomat_str.data(), diplomat_str.size()});
@@ -70,5 +70,5 @@ inline void OptionString::operator delete(void* ptr) {
   diplomat::capi::OptionString_destroy(reinterpret_cast<diplomat::capi::OptionString*>(ptr));
 }
 
-
+
 #endif // OptionString_HPP

@@ -22,7 +22,7 @@ namespace ns {
 namespace capi {
     struct RenamedMyIterable;
 } // namespace capi
-} // namespace
+} // namespace
 
 namespace ns {
 class RenamedMyIterable {
@@ -50,5 +50,5 @@ private:
   static void operator delete[](void*, size_t) = delete;
 };
 
-} // namespace
+} // namespace
 #endif // ns_RenamedMyIterable_D_HPP

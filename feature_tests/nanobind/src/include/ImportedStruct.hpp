@@ -21,7 +21,7 @@ namespace capi {
     
     } // extern "C"
 } // namespace capi
-} // namespace
+} // namespace
 
 
 inline diplomat::capi::ImportedStruct ImportedStruct::AsFFI() const {
@@ -38,5 +38,5 @@ inline ImportedStruct ImportedStruct::FromFFI(diplomat::capi::ImportedStruct c_s
   };
 }
 
-
+
 #endif // ImportedStruct_HPP

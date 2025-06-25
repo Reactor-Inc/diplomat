@@ -18,7 +18,7 @@ namespace diplomat {
 namespace capi {
     struct Opaque;
 } // namespace capi
-} // namespace
+} // namespace
 
 class Opaque {
 public:
@@ -60,5 +60,5 @@ private:
   static void operator delete[](void*, size_t) = delete;
 };
 
-
+
 #endif // Opaque_D_HPP

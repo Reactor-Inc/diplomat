@@ -28,7 +28,7 @@ namespace capi {
     
     } // extern "C"
 } // namespace capi
-} // namespace
+} // namespace
 
 inline std::unique_ptr<Unnamespaced> Unnamespaced::make(ns::RenamedAttrEnum _e) {
   auto result = diplomat::capi::namespace_Unnamespaced_make(_e.AsFFI());
@@ -60,5 +60,5 @@ inline void Unnamespaced::operator delete(void* ptr) {
   diplomat::capi::namespace_Unnamespaced_destroy(reinterpret_cast<diplomat::capi::Unnamespaced*>(ptr));
 }
 
-
+
 #endif // Unnamespaced_HPP

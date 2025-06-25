@@ -34,7 +34,7 @@ namespace capi {
     
     } // extern "C"
 } // namespace capi
-} // namespace
+} // namespace
 
 inline std::unique_ptr<OpaqueThinVec> OpaqueThinVec::create(diplomat::span<const int32_t> a, diplomat::span<const float> b) {
   auto result = diplomat::capi::OpaqueThinVec_create({a.data(), a.size()},
@@ -87,5 +87,5 @@ inline void OpaqueThinVec::operator delete(void* ptr) {
   diplomat::capi::OpaqueThinVec_destroy(reinterpret_cast<diplomat::capi::OpaqueThinVec*>(ptr));
 }
 
-
+
 #endif // OpaqueThinVec_HPP

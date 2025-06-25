@@ -20,7 +20,7 @@ namespace ns {
 namespace capi {
     struct RenamedOpaqueIterable;
 } // namespace capi
-} // namespace
+} // namespace
 
 namespace ns {
 class RenamedOpaqueIterable {
@@ -44,5 +44,5 @@ private:
   static void operator delete[](void*, size_t) = delete;
 };
 
-} // namespace
+} // namespace
 #endif // ns_RenamedOpaqueIterable_D_HPP

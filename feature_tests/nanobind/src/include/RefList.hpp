@@ -25,7 +25,7 @@ namespace capi {
     
     } // extern "C"
 } // namespace capi
-} // namespace
+} // namespace
 
 inline std::unique_ptr<RefList> RefList::node(const RefListParameter& data) {
   auto result = diplomat::capi::RefList_node(data.AsFFI());
@@ -52,5 +52,5 @@ inline void RefList::operator delete(void* ptr) {
   diplomat::capi::RefList_destroy(reinterpret_cast<diplomat::capi::RefList*>(ptr));
 }
 
-
+
 #endif // RefList_HPP

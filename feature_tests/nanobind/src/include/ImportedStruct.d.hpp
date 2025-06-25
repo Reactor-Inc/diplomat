@@ -23,7 +23,7 @@ namespace capi {
     
     typedef struct ImportedStruct_option {union { ImportedStruct ok; }; bool is_ok; } ImportedStruct_option;
 } // namespace capi
-} // namespace
+} // namespace
 
 
 struct ImportedStruct {
@@ -34,5 +34,5 @@ struct ImportedStruct {
   inline static ImportedStruct FromFFI(diplomat::capi::ImportedStruct c_struct);
 };
 
-
+
 #endif // ImportedStruct_D_HPP

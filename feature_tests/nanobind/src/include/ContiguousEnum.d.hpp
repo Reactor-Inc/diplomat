@@ -22,7 +22,7 @@ namespace capi {
     
     typedef struct ContiguousEnum_option {union { ContiguousEnum ok; }; bool is_ok; } ContiguousEnum_option;
 } // namespace capi
-} // namespace
+} // namespace
 
 class ContiguousEnum {
 public:
@@ -46,5 +46,5 @@ private:
     Value value;
 };
 
-
+
 #endif // ContiguousEnum_D_HPP

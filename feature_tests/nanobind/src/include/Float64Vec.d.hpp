@@ -15,7 +15,7 @@ namespace diplomat {
 namespace capi {
     struct Float64Vec;
 } // namespace capi
-} // namespace
+} // namespace
 
 class Float64Vec {
 public:
@@ -60,5 +60,5 @@ private:
   static void operator delete[](void*, size_t) = delete;
 };
 
-
+
 #endif // Float64Vec_D_HPP

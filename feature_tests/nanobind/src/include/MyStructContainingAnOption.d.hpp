@@ -25,7 +25,7 @@ namespace capi {
     
     typedef struct MyStructContainingAnOption_option {union { MyStructContainingAnOption ok; }; bool is_ok; } MyStructContainingAnOption_option;
 } // namespace capi
-} // namespace
+} // namespace
 
 
 struct MyStructContainingAnOption {
@@ -40,5 +40,5 @@ struct MyStructContainingAnOption {
   inline static MyStructContainingAnOption FromFFI(diplomat::capi::MyStructContainingAnOption c_struct);
 };
 
-
+
 #endif // MyStructContainingAnOption_D_HPP

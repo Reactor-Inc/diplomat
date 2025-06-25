@@ -15,7 +15,7 @@ namespace diplomat {
 namespace capi {
     struct Utf16Wrap;
 } // namespace capi
-} // namespace
+} // namespace
 
 class Utf16Wrap {
 public:
@@ -40,5 +40,5 @@ private:
   static void operator delete[](void*, size_t) = delete;
 };
 
-
+
 #endif // Utf16Wrap_D_HPP

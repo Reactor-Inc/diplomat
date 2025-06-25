@@ -21,7 +21,7 @@ namespace capi {
     
     typedef struct CallbackWrapper_option {union { CallbackWrapper ok; }; bool is_ok; } CallbackWrapper_option;
 } // namespace capi
-} // namespace
+} // namespace
 
 
 struct CallbackWrapper {
@@ -41,5 +41,5 @@ struct CallbackWrapper {
   inline static CallbackWrapper FromFFI(diplomat::capi::CallbackWrapper c_struct);
 };
 
-
+
 #endif // CallbackWrapper_D_HPP

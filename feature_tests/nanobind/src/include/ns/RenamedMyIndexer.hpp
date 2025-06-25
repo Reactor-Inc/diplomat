@@ -25,7 +25,7 @@ namespace capi {
     
     } // extern "C"
 } // namespace capi
-} // namespace
+} // namespace
 
 inline std::optional<std::string_view> ns::RenamedMyIndexer::operator[](size_t i) const {
   auto result = ns::capi::namespace_MyIndexer_get(this->AsFFI(),
@@ -53,5 +53,5 @@ inline void ns::RenamedMyIndexer::operator delete(void* ptr) {
   ns::capi::namespace_MyIndexer_destroy(reinterpret_cast<ns::capi::RenamedMyIndexer*>(ptr));
 }
 
-
+
 #endif // ns_RenamedMyIndexer_HPP

@@ -22,7 +22,7 @@ namespace capi {
     
     } // extern "C"
 } // namespace capi
-} // namespace
+} // namespace
 
 
 inline diplomat::capi::OptionStruct OptionStruct::AsFFI() const {
@@ -43,5 +43,5 @@ inline OptionStruct OptionStruct::FromFFI(diplomat::capi::OptionStruct c_struct)
   };
 }
 
-
+
 #endif // OptionStruct_HPP

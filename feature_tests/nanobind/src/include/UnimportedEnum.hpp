@@ -20,7 +20,7 @@ namespace capi {
     
     } // extern "C"
 } // namespace capi
-} // namespace
+} // namespace
 
 inline diplomat::capi::UnimportedEnum UnimportedEnum::AsFFI() const {
   return static_cast<diplomat::capi::UnimportedEnum>(value);

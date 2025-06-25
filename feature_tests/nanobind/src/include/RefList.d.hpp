@@ -18,7 +18,7 @@ namespace diplomat {
 namespace capi {
     struct RefList;
 } // namespace capi
-} // namespace
+} // namespace
 
 class RefList {
 public:
@@ -39,5 +39,5 @@ private:
   static void operator delete[](void*, size_t) = delete;
 };
 
-
+
 #endif // RefList_D_HPP

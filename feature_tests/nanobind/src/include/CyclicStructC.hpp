@@ -25,7 +25,7 @@ namespace capi {
     
     } // extern "C"
 } // namespace capi
-} // namespace
+} // namespace
 
 inline CyclicStructC CyclicStructC::takes_nested_parameters(CyclicStructC c) {
   auto result = diplomat::capi::CyclicStructC_takes_nested_parameters(c.AsFFI());
@@ -53,5 +53,5 @@ inline CyclicStructC CyclicStructC::FromFFI(diplomat::capi::CyclicStructC c_stru
   };
 }
 
-
+
 #endif // CyclicStructC_HPP

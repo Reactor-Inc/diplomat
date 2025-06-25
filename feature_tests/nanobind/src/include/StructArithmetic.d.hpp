@@ -20,7 +20,7 @@ namespace capi {
     
     typedef struct StructArithmetic_option {union { StructArithmetic ok; }; bool is_ok; } StructArithmetic_option;
 } // namespace capi
-} // namespace
+} // namespace
 
 
 struct StructArithmetic {
@@ -49,5 +49,5 @@ struct StructArithmetic {
   inline static StructArithmetic FromFFI(diplomat::capi::StructArithmetic c_struct);
 };
 
-
+
 #endif // StructArithmetic_D_HPP

@@ -25,7 +25,7 @@ namespace capi {
     
     } // extern "C"
 } // namespace capi
-} // namespace
+} // namespace
 
 inline std::optional<uint8_t> ns::RenamedMyIterator::next() {
   auto result = ns::capi::namespace_MyIterator_next(this->AsFFI());
@@ -52,5 +52,5 @@ inline void ns::RenamedMyIterator::operator delete(void* ptr) {
   ns::capi::namespace_MyIterator_destroy(reinterpret_cast<ns::capi::RenamedMyIterator*>(ptr));
 }
 
-
+
 #endif // ns_RenamedMyIterator_HPP

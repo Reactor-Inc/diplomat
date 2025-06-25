@@ -23,7 +23,7 @@ namespace ns {
 namespace capi {
     struct AttrOpaque1Renamed;
 } // namespace capi
-} // namespace
+} // namespace
 
 namespace ns {
 class AttrOpaque1Renamed {
@@ -53,5 +53,5 @@ private:
   static void operator delete[](void*, size_t) = delete;
 };
 
-} // namespace
+} // namespace
 #endif // ns_AttrOpaque1Renamed_D_HPP

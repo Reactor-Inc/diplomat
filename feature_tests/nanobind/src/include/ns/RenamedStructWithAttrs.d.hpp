@@ -24,7 +24,7 @@ namespace capi {
     
     typedef struct RenamedStructWithAttrs_option {union { RenamedStructWithAttrs ok; }; bool is_ok; } RenamedStructWithAttrs_option;
 } // namespace capi
-} // namespace
+} // namespace
 
 
 namespace ns {
@@ -40,5 +40,5 @@ struct RenamedStructWithAttrs {
   inline static ns::RenamedStructWithAttrs FromFFI(ns::capi::RenamedStructWithAttrs c_struct);
 };
 
-} // namespace
+} // namespace
 #endif // ns_RenamedStructWithAttrs_D_HPP

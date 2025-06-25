@@ -34,7 +34,7 @@ namespace capi {
     
     } // extern "C"
 } // namespace capi
-} // namespace
+} // namespace
 
 inline StructArithmetic StructArithmetic::ORIGIN() {
   auto result = diplomat::capi::StructArithmetic_ORIGIN();
@@ -106,5 +106,5 @@ inline StructArithmetic StructArithmetic::FromFFI(diplomat::capi::StructArithmet
   };
 }
 
-
+
 #endif // StructArithmetic_HPP

@@ -29,7 +29,7 @@ namespace capi {
     
     } // extern "C"
 } // namespace capi
-} // namespace
+} // namespace
 
 inline std::unique_ptr<ns::RenamedMyIterable> ns::RenamedMyIterable::new_(diplomat::span<const uint8_t> x) {
   auto result = ns::capi::namespace_MyIterable_new({x.data(), x.size()});
@@ -70,5 +70,5 @@ inline void ns::RenamedMyIterable::operator delete(void* ptr) {
   ns::capi::namespace_MyIterable_destroy(reinterpret_cast<ns::capi::RenamedMyIterable*>(ptr));
 }
 
-
+
 #endif // ns_RenamedMyIterable_HPP

@@ -15,7 +15,7 @@ namespace nested::ns2 {
 namespace capi {
     struct Nested;
 } // namespace capi
-} // namespace
+} // namespace
 
 namespace nested::ns2 {
 class Nested {
@@ -35,5 +35,5 @@ private:
   static void operator delete[](void*, size_t) = delete;
 };
 
-} // namespace
+} // namespace
 #endif // nested_ns2_Nested_D_HPP

@@ -61,7 +61,7 @@ namespace capi {
     
     } // extern "C"
 } // namespace capi
-} // namespace
+} // namespace
 
 inline int32_t CallbackWrapper::test_multi_arg_callback(std::function<int32_t(int32_t)> f, int32_t x) {
   auto result = diplomat::capi::CallbackWrapper_test_multi_arg_callback({new decltype(f)(std::move(f)), diplomat::fn_traits(f).c_run_callback, diplomat::fn_traits(f).c_delete},
@@ -103,5 +103,5 @@ inline CallbackWrapper CallbackWrapper::FromFFI(diplomat::capi::CallbackWrapper 
   };
 }
 
-
+
 #endif // CallbackWrapper_HPP

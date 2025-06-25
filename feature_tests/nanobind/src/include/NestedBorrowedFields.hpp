@@ -26,7 +26,7 @@ namespace capi {
     
     } // extern "C"
 } // namespace capi
-} // namespace
+} // namespace
 
 inline diplomat::result<NestedBorrowedFields, diplomat::Utf8Error> NestedBorrowedFields::from_bar_and_foo_and_strings(const Bar& bar, const Foo& foo, std::u16string_view dstr16_x, std::u16string_view dstr16_z, std::string_view utf8_str_y, std::string_view utf8_str_z) {
   if (!diplomat::capi::diplomat_is_str(utf8_str_y.data(), utf8_str_y.size())) {
@@ -61,5 +61,5 @@ inline NestedBorrowedFields NestedBorrowedFields::FromFFI(diplomat::capi::Nested
   };
 }
 
-
+
 #endif // NestedBorrowedFields_HPP

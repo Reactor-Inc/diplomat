@@ -41,7 +41,7 @@ namespace capi {
     
     } // extern "C"
 } // namespace capi
-} // namespace
+} // namespace
 
 inline std::unique_ptr<OpaqueMutexedString> OpaqueMutexedString::from_usize(size_t number) {
   auto result = diplomat::capi::OpaqueMutexedString_from_usize(number);
@@ -111,5 +111,5 @@ inline void OpaqueMutexedString::operator delete(void* ptr) {
   diplomat::capi::OpaqueMutexedString_destroy(reinterpret_cast<diplomat::capi::OpaqueMutexedString*>(ptr));
 }
 
-
+
 #endif // OpaqueMutexedString_HPP

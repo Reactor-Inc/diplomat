@@ -19,7 +19,7 @@ namespace capi {
     
     typedef struct BorrowedFieldsReturning_option {union { BorrowedFieldsReturning ok; }; bool is_ok; } BorrowedFieldsReturning_option;
 } // namespace capi
-} // namespace
+} // namespace
 
 
 struct BorrowedFieldsReturning {
@@ -29,5 +29,5 @@ struct BorrowedFieldsReturning {
   inline static BorrowedFieldsReturning FromFFI(diplomat::capi::BorrowedFieldsReturning c_struct);
 };
 
-
+
 #endif // BorrowedFieldsReturning_D_HPP

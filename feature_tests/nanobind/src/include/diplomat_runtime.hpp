@@ -77,7 +77,7 @@ MAKE_SLICES_AND_OPTIONS(Char, char32_t)
 MAKE_SLICES_AND_OPTIONS(String, char)
 MAKE_SLICES_AND_OPTIONS(String16, char16_t)
 MAKE_SLICES_AND_OPTIONS(Strings, DiplomatStringView)
-MAKE_SLICES_AND_OPTIONS(Strings16, DiplomatString16View)
+MAKE_SLICES_AND_OPTIONS(Strings16, DiplomatString16View)
 
 } // extern "C"
 } // namespace capi
@@ -359,4 +359,4 @@ struct next_to_iter_helper {
 
 } // namespace diplomat
 
-#endif
+#endif

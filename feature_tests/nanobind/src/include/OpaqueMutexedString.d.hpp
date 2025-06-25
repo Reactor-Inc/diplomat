@@ -18,7 +18,7 @@ namespace diplomat {
 namespace capi {
     struct OpaqueMutexedString;
 } // namespace capi
-} // namespace
+} // namespace
 
 class OpaqueMutexedString {
 public:
@@ -55,5 +55,5 @@ private:
   static void operator delete[](void*, size_t) = delete;
 };
 
-
+
 #endif // OpaqueMutexedString_D_HPP

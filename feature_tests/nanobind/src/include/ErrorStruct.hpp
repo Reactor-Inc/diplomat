@@ -20,7 +20,7 @@ namespace capi {
     
     } // extern "C"
 } // namespace capi
-} // namespace
+} // namespace
 
 
 inline diplomat::capi::ErrorStruct ErrorStruct::AsFFI() const {
@@ -37,5 +37,5 @@ inline ErrorStruct ErrorStruct::FromFFI(diplomat::capi::ErrorStruct c_struct) {
   };
 }
 
-
+
 #endif // ErrorStruct_HPP

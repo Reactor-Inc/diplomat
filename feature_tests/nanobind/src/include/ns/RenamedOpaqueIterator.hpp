@@ -25,7 +25,7 @@ namespace capi {
     
     } // extern "C"
 } // namespace capi
-} // namespace
+} // namespace
 
 inline std::unique_ptr<ns::AttrOpaque1Renamed> ns::RenamedOpaqueIterator::next() {
   auto result = ns::capi::namespace_OpaqueIterator_next(this->AsFFI());
@@ -52,5 +52,5 @@ inline void ns::RenamedOpaqueIterator::operator delete(void* ptr) {
   ns::capi::namespace_OpaqueIterator_destroy(reinterpret_cast<ns::capi::RenamedOpaqueIterator*>(ptr));
 }
 
-
+
 #endif // ns_RenamedOpaqueIterator_HPP

@@ -18,7 +18,7 @@ namespace diplomat {
 namespace capi {
     struct OpaqueThinIter;
 } // namespace capi
-} // namespace
+} // namespace
 
 class OpaqueThinIter {
 public:
@@ -39,5 +39,5 @@ private:
   static void operator delete[](void*, size_t) = delete;
 };
 
-
+
 #endif // OpaqueThinIter_D_HPP

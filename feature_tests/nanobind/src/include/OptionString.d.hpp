@@ -15,7 +15,7 @@ namespace diplomat {
 namespace capi {
     struct OptionString;
 } // namespace capi
-} // namespace
+} // namespace
 
 class OptionString {
 public:
@@ -40,5 +40,5 @@ private:
   static void operator delete[](void*, size_t) = delete;
 };
 
-
+
 #endif // OptionString_D_HPP

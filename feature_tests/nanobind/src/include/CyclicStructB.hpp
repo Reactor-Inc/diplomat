@@ -26,7 +26,7 @@ namespace capi {
     
     } // extern "C"
 } // namespace capi
-} // namespace
+} // namespace
 
 inline CyclicStructA CyclicStructB::get_a() {
   auto result = diplomat::capi::CyclicStructB_get_a();
@@ -51,5 +51,5 @@ inline CyclicStructB CyclicStructB::FromFFI(diplomat::capi::CyclicStructB c_stru
   };
 }
 
-
+
 #endif // CyclicStructB_HPP

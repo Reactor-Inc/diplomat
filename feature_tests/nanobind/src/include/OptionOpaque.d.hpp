@@ -19,7 +19,7 @@ namespace diplomat {
 namespace capi {
     struct OptionOpaque;
 } // namespace capi
-} // namespace
+} // namespace
 
 class OptionOpaque {
 public:
@@ -78,5 +78,5 @@ private:
   static void operator delete[](void*, size_t) = delete;
 };
 
-
+
 #endif // OptionOpaque_D_HPP

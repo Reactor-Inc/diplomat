@@ -15,7 +15,7 @@ namespace ns {
 namespace capi {
     struct RenamedMyIndexer;
 } // namespace capi
-} // namespace
+} // namespace
 
 namespace ns {
 class RenamedMyIndexer {
@@ -37,5 +37,5 @@ private:
   static void operator delete[](void*, size_t) = delete;
 };
 
-} // namespace
+} // namespace
 #endif // ns_RenamedMyIndexer_D_HPP

@@ -49,7 +49,7 @@ namespace capi {
     
     } // extern "C"
 } // namespace capi
-} // namespace
+} // namespace
 
 inline std::unique_ptr<Float64Vec> Float64Vec::new_(diplomat::span<const double> v) {
   auto result = diplomat::capi::Float64Vec_new({v.data(), v.size()});
@@ -140,5 +140,5 @@ inline void Float64Vec::operator delete(void* ptr) {
   diplomat::capi::Float64Vec_destroy(reinterpret_cast<diplomat::capi::Float64Vec*>(ptr));
 }
 
-
+
 #endif // Float64Vec_HPP
