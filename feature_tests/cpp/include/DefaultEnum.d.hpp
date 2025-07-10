@@ -8,6 +8,7 @@
 #include <memory>
 #include <functional>
 #include <optional>
+#include <cstdlib>
 #include "diplomat_runtime.hpp"
 
 
@@ -17,7 +18,7 @@ namespace capi {
       DefaultEnum_A = 0,
       DefaultEnum_B = 1,
     };
-    
+
     typedef struct DefaultEnum_option {union { DefaultEnum ok; }; bool is_ok; } DefaultEnum_option;
 } // namespace capi
 } // namespace
@@ -29,7 +30,8 @@ public:
     B = 1,
   };
 
-  DefaultEnum() = default;
+  DefaultEnum(): value(Value::A) {}
+
   // Implicit conversions between enum and ::Value
   constexpr DefaultEnum(Value v) : value(v) {}
   constexpr operator Value() const { return value; }

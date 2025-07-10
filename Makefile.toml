@@ -121,8 +121,9 @@ script_runner = "@shell"
 script = '''
 cd feature_tests/js/
 cp ../../target/wasm32-unknown-unknown/debug/diplomat_feature_tests.wasm api/diplomat_feature_tests.wasm
-npm install && npm run test
+npm ci && npm run test -w stable
 '''
+
 
 [tasks.test-demo-feature]
 category = "Tests"
@@ -131,7 +132,7 @@ script_runner = "@shell"
 script = '''
 cd feature_tests/demo_gen
 cp ../../target/wasm32-unknown-unknown/debug/diplomat_feature_tests.wasm ../js/api/diplomat_feature_tests.wasm
-npm install && npm run test
+npm ci && npm run test
 '''
 
 [tasks.test-demo-example]
@@ -141,7 +142,7 @@ script_runner = "@shell"
 script = '''
 cd example/demo_gen
 cp ../../target/wasm32-unknown-unknown/debug/diplomat_example.wasm ../js/lib/api/diplomat_example.wasm
-npm install && npm run test
+npm ci && npm run test
 '''
 
 [tasks.test-dart-example]
@@ -330,6 +331,26 @@ category = "Tests"
 dependencies = ["check-cpp-feature", "check-cpp-example"]
 
 
+[tasks.check-whitespace]
+category = "Tests"
+script_runner = "@duckscript"
+script = '''
+# Only these backends have clean output
+backends = array "c" "cpp" "js" "dart"
+tests = array "feature_tests" "example"
+for test in ${tests}
+ for backend in ${backends}
+    echo "Looking for trailing whitespace in generated code in ${test}/${backend}"
+    exit_code = exec --get-exit-code grep -Hrn \\s\\+$ "${test}/${backend}"
+    if eq ${exit_code} 0
+        echo "Found trailing whitespace (or Windows line endings) in ${test}/${backend}"
+        exit 1
+    end
+ end
+end
+
+'''
+
 # Generation
 [tasks.gen-feature]
 category = "Code generation"
@@ -369,6 +390,9 @@ dependencies = ["gen-dart-feature", "gen-dart-example"]
 category = "Code generation"
 dependencies = ["gen-kotlin-feature", "gen-kotlin-example"]
 
+[tasks.gen-js]
+category = "Code generation"
+dependencies = ["gen-js-feature", "gen-js-example"]
 
 [tasks.gen-c-feature]
 category = "Code generation"
@@ -394,7 +418,7 @@ script_runner = "@duckscript"
 script = '''
 exit_on_error true
 !include_files ./support/functions.ds
-generate_generic feature_tests cpp include
+generate_generic feature_tests cpp include 
 '''
 
 [tasks.gen-cpp-example]
@@ -412,8 +436,9 @@ category = "Code generation"
 script_runner = "@duckscript"
 script = '''
 exit_on_error true
+
 !include_files ./support/functions.ds
-generate_generic feature_tests js api
+generate_js spec feature_tests .
 '''
 
 [tasks.gen-js-example]
@@ -421,8 +446,9 @@ category = "Code generation"
 script_runner = "@duckscript"
 script = '''
 exit_on_error true
+
 !include_files ./support/functions.ds
-generate_generic example js lib/api
+generate_js spec example lib
 '''
 
 [tasks.gen-demo-feature]
@@ -487,11 +513,13 @@ script_runner = "@duckscript"
 script = '''
 exit_on_error true
 !include_files ./support/functions.ds
-generate_generic feature_tests nanobind src/cpp
+generate_generic feature_tests nanobind src/cpp 
 mv nanobind/src/cpp/somelib_ext.cpp nanobind/src/somelib_ext.cpp
 rm -rf nanobind/src/include
 mv nanobind/src/cpp/include nanobind/src/
-rm -rf nanobind/src/cpp
+rm -fr nanobind/src/sub_modules
+mv nanobind/src/cpp/sub_modules nanobind/src/
+rm -rf nanobind/src/cpp/
 '''
 # Build deps
 
@@ -511,11 +539,16 @@ category = "Plumbing"
 command = "cargo"
 args = ["build", "-p", "diplomat-feature-tests"]
 [tasks.build-example-wasm]
+# Can be set to stable once the -Zwasm-c-abi=spec option is the default on stable
+toolchain = "nightly"
 description = "Build feature_tests for wasm"
 category = "Plumbing"
 command = "cargo"
 args = ["build", "-p", "diplomat-example", "--target", "wasm32-unknown-unknown"]
+
 [tasks.build-feature-wasm]
+# Can be set to stable once the -Zwasm-c-abi=spec option is the default on stable
+toolchain = "nightly"
 description = "Build feature_tests for wasm"
 category = "Plumbing"
 command = "cargo"
@@ -526,7 +559,6 @@ args = [
     "--target",
     "wasm32-unknown-unknown",
 ]
-
 
 [tasks.build-example-jvm]
 description = "Build feature_tests for wasm"

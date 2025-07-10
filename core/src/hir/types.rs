@@ -22,7 +22,7 @@ pub enum Type<P: TyPosition = Everywhere> {
     Struct(P::StructPath),
     ImplTrait(P::TraitPath),
     Enum(EnumPath),
-    Slice(Slice),
+    Slice(Slice<P>),
     Callback(P::CallbackInstantiation), // only a Callback if P == InputOnly
     /// `DiplomatOption<T>`, for  a primitive, struct, or enum `T`.
     ///
@@ -48,7 +48,7 @@ pub enum SelfType {
 
 #[derive(Copy, Clone, Debug)]
 #[non_exhaustive]
-pub enum Slice {
+pub enum Slice<P: TyPosition> {
     /// A string slice, e.g. `&DiplomatStr` or `Box<DiplomatStr>`.
     ///
     /// Owned slices are useful for garbage-collected languages that have to
@@ -72,6 +72,12 @@ pub enum Slice {
     /// Rust ABI. In other languages this is the idiomatic list of string
     /// views, i.e. `std::span<std::string_view>` or `core.List<core.String>`.
     Strs(StringEncoding),
+
+    /// A `&[Struct]`, where `Struct` is a structure that is only comprised of primitive types and
+    /// structures that only contain primitive types. Must be marked with `#[diplomat::attr(auto, allowed_in_slices)]`.
+    /// Currently assumes that `&[Struct]` is provided as an input only for function parameters.
+    /// Validated in [`super::type_context::TypeContext::validate_primitive_slice_struct`]
+    Struct(Option<Borrow>, P::StructPath),
 }
 
 // For now, the lifetime in not optional. This is because when you have references
@@ -128,6 +134,7 @@ impl<P: TyPosition> Type<P> {
                     .map(|lt| std::slice::from_ref(lt).iter().copied())
                     .unwrap_or([].iter().copied()),
             ),
+            Type::DiplomatOption(ty) => ty.lifetimes(),
             // TODO the Callback case
             _ => Either::Left([].iter().copied()),
         }
@@ -159,6 +166,18 @@ impl<P: TyPosition> Type<P> {
             _ => false,
         }
     }
+    /// Returns whether the self parameter is borrowed immutably.
+    ///
+    /// Curently this can only happen with opaque types.
+    pub fn is_immutably_borrowed(&self) -> bool {
+        matches!(self, Self::Opaque(opaque_path) if opaque_path.owner.mutability() == Some(Mutability::Immutable))
+    }
+    /// Returns whether the self parameter is borrowed mutably.
+    ///
+    /// Curently this can only happen with opaque types.
+    pub fn is_mutably_borrowed(&self) -> bool {
+        matches!(self, Self::Opaque(opaque_path) if opaque_path.owner.mutability() == Some(Mutability::Mutable))
+    }
 }
 
 impl SelfType {
@@ -168,6 +187,12 @@ impl SelfType {
     pub fn is_immutably_borrowed(&self) -> bool {
         matches!(self, SelfType::Opaque(opaque_path) if opaque_path.owner.mutability == Mutability::Immutable)
     }
+    /// Returns whether the self parameter is borrowed mutably.
+    ///
+    /// Curently this can only happen with opaque types.
+    pub fn is_mutably_borrowed(&self) -> bool {
+        matches!(self, SelfType::Opaque(opaque_path) if opaque_path.owner.mutability == Mutability::Mutable)
+    }
     /// Returns whether the self parameter is consuming.
     ///
     /// Currently this can only (and must) only happen for non-opaque types.
@@ -176,14 +201,16 @@ impl SelfType {
     }
 }
 
-impl Slice {
+impl<P: TyPosition> Slice<P> {
     /// Returns the [`Lifetime`] contained in either the `Str` or `Primitive`
     /// variant.
     pub fn lifetime(&self) -> Option<&MaybeStatic<Lifetime>> {
         match self {
             Slice::Str(lifetime, ..) => lifetime.as_ref(),
-            Slice::Primitive(Some(reference), ..) => Some(&reference.lifetime),
-            Slice::Primitive(..) => None,
+            Slice::Primitive(Some(reference), ..) | Slice::Struct(Some(reference), ..) => {
+                Some(&reference.lifetime)
+            }
+            Slice::Primitive(..) | Slice::Struct(..) => None,
             Slice::Strs(..) => Some({
                 const X: MaybeStatic<Lifetime> = MaybeStatic::NonStatic(Lifetime::new(usize::MAX));
                 &X

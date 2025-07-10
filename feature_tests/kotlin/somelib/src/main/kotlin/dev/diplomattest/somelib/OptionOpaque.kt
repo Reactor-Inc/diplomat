@@ -5,7 +5,6 @@ import com.sun.jna.Native
 import com.sun.jna.Pointer
 import com.sun.jna.Structure
 
-
 internal interface OptionOpaqueLib: Library {
     fun OptionOpaque_destroy(handle: Pointer)
     fun OptionOpaque_new(i: Int): Pointer?
@@ -39,6 +38,7 @@ class OptionOpaque internal constructor (
     companion object {
         internal val libClass: Class<OptionOpaqueLib> = OptionOpaqueLib::class.java
         internal val lib: OptionOpaqueLib = Native.load("somelib", libClass)
+        @JvmStatic
         
         fun new_(i: Int): OptionOpaque? {
             
@@ -49,6 +49,7 @@ class OptionOpaque internal constructor (
             CLEANER.register(returnOpaque, OptionOpaque.OptionOpaqueCleaner(handle, OptionOpaque.lib));
             return returnOpaque
         }
+        @JvmStatic
         
         fun newNone(): OptionOpaque? {
             
@@ -59,6 +60,7 @@ class OptionOpaque internal constructor (
             CLEANER.register(returnOpaque, OptionOpaque.OptionOpaqueCleaner(handle, OptionOpaque.lib));
             return returnOpaque
         }
+        @JvmStatic
         
         fun returns(): OptionStruct? {
             
@@ -70,6 +72,7 @@ class OptionOpaque internal constructor (
             return returnStruct
                                     
         }
+        @JvmStatic
         
         fun newStruct(): OptionStruct {
             
@@ -78,6 +81,7 @@ class OptionOpaque internal constructor (
             val returnStruct = OptionStruct(returnVal)
             return returnStruct
         }
+        @JvmStatic
         
         fun newStructNones(): OptionStruct {
             
@@ -86,6 +90,7 @@ class OptionOpaque internal constructor (
             val returnStruct = OptionStruct(returnVal)
             return returnStruct
         }
+        @JvmStatic
         
         fun optionOpaqueArgument(arg: OptionOpaque?): Boolean {
             

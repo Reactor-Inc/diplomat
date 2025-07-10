@@ -10,6 +10,7 @@
 #include <memory>
 #include <functional>
 #include <optional>
+#include <cstdlib>
 #include "CyclicStructA.hpp"
 #include "diplomat_runtime.hpp"
 
@@ -17,12 +18,11 @@
 namespace diplomat {
 namespace capi {
     extern "C" {
-    
+
     diplomat::capi::CyclicStructC CyclicStructC_takes_nested_parameters(diplomat::capi::CyclicStructC c);
-    
+
     void CyclicStructC_cyclic_out(diplomat::capi::CyclicStructC self, diplomat::capi::DiplomatWrite* write);
-    
-    
+
     } // extern "C"
 } // namespace capi
 } // namespace
@@ -38,6 +38,12 @@ inline std::string CyclicStructC::cyclic_out() const {
   diplomat::capi::CyclicStructC_cyclic_out(this->AsFFI(),
     &write);
   return output;
+}
+template<typename W>
+inline void CyclicStructC::cyclic_out_write(W& writeable) const {
+  diplomat::capi::DiplomatWrite write = diplomat::WriteTrait<W>::Construct(writeable);
+  diplomat::capi::CyclicStructC_cyclic_out(this->AsFFI(),
+    &write);
 }
 
 

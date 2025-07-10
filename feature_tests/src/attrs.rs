@@ -5,6 +5,8 @@
 pub mod ffi {
     #[derive(Clone)]
     #[diplomat::opaque]
+    // Attr for generating mocking interface in kotlin backend to enable JVM test fakes.
+    #[diplomat::attr(kotlin, generate_mocking_interface)]
     #[diplomat::attr(not(kotlin), rename = "AttrOpaque1Renamed")]
     pub struct AttrOpaque1;
 
@@ -148,7 +150,7 @@ pub mod ffi {
 
     #[diplomat::opaque]
     #[diplomat::attr(not(supports = arithmetic), disable)]
-    struct OpaqueArithmetic {
+    pub(crate) struct OpaqueArithmetic {
         x: i32,
         y: i32,
     }
@@ -223,6 +225,7 @@ pub mod ffi {
         }
     }
 
+    #[diplomat::attr(auto, allowed_in_slices)]
     pub struct StructWithAttrs {
         a: bool,
         b: u32,

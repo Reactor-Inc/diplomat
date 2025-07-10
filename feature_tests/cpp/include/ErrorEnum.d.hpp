@@ -8,6 +8,7 @@
 #include <memory>
 #include <functional>
 #include <optional>
+#include <cstdlib>
 #include "diplomat_runtime.hpp"
 
 
@@ -17,7 +18,7 @@ namespace capi {
       ErrorEnum_Foo = 0,
       ErrorEnum_Bar = 1,
     };
-    
+
     typedef struct ErrorEnum_option {union { ErrorEnum ok; }; bool is_ok; } ErrorEnum_option;
 } // namespace capi
 } // namespace
@@ -29,7 +30,8 @@ public:
     Bar = 1,
   };
 
-  ErrorEnum() = default;
+  ErrorEnum(): value(Value::Foo) {}
+
   // Implicit conversions between enum and ::Value
   constexpr ErrorEnum(Value v) : value(v) {}
   constexpr operator Value() const { return value; }

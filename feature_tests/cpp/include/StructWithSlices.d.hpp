@@ -8,6 +8,7 @@
 #include <memory>
 #include <functional>
 #include <optional>
+#include <cstdlib>
 #include "diplomat_runtime.hpp"
 
 
@@ -17,7 +18,7 @@ namespace capi {
       diplomat::capi::DiplomatStringView first;
       diplomat::capi::DiplomatU16View second;
     };
-    
+
     typedef struct StructWithSlices_option {union { StructWithSlices ok; }; bool is_ok; } StructWithSlices_option;
 } // namespace capi
 } // namespace
@@ -28,6 +29,8 @@ struct StructWithSlices {
   diplomat::span<const uint16_t> second;
 
   inline std::string return_last() const;
+  template<typename W>
+  inline void return_last_write(W& writeable_output) const;
 
   inline diplomat::capi::StructWithSlices AsFFI() const;
   inline static StructWithSlices FromFFI(diplomat::capi::StructWithSlices c_struct);

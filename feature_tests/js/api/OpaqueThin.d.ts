@@ -4,8 +4,13 @@ import type { pointer, codepoint } from "./diplomat-runtime.d.ts";
 
 
 export class OpaqueThin {
-    
+    /** @internal */
     get ffiValue(): pointer;
-get a(): number;
-get b(): number;
+    /** @internal */
+    constructor();
+
+
+    get a(): number;
+
+    get b(): number;
 }

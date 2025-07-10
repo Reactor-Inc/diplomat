@@ -10,16 +10,16 @@
 #include <memory>
 #include <functional>
 #include <optional>
+#include <cstdlib>
 #include "diplomat_runtime.hpp"
 
 
 namespace diplomat {
 namespace capi {
     extern "C" {
-    
+
     void StructWithSlices_return_last(diplomat::capi::StructWithSlices self, diplomat::capi::DiplomatWrite* write);
-    
-    
+
     } // extern "C"
 } // namespace capi
 } // namespace
@@ -30,6 +30,12 @@ inline std::string StructWithSlices::return_last() const {
   diplomat::capi::StructWithSlices_return_last(this->AsFFI(),
     &write);
   return output;
+}
+template<typename W>
+inline void StructWithSlices::return_last_write(W& writeable) const {
+  diplomat::capi::DiplomatWrite write = diplomat::WriteTrait<W>::Construct(writeable);
+  diplomat::capi::StructWithSlices_return_last(this->AsFFI(),
+    &write);
 }
 
 

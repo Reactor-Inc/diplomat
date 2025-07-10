@@ -8,6 +8,7 @@
 #include <memory>
 #include <functional>
 #include <optional>
+#include <cstdlib>
 #include "diplomat_runtime.hpp"
 
 struct ImportedStruct;
@@ -30,6 +31,8 @@ public:
   inline static diplomat::result<std::unique_ptr<Opaque>, diplomat::Utf8Error> from_str(std::string_view input);
 
   inline std::string get_debug_str() const;
+  template<typename W>
+  inline void get_debug_str_write(W& writeable_output) const;
 
   /**
    * See the [Rust documentation for `something`](https://docs.rs/Something/latest/struct.Something.html#method.something) for more information.

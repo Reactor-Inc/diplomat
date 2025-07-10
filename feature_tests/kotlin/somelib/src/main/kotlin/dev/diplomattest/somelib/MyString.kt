@@ -5,7 +5,6 @@ import com.sun.jna.Native
 import com.sun.jna.Pointer
 import com.sun.jna.Structure
 
-
 internal interface MyStringLib: Library {
     fun MyString_destroy(handle: Pointer)
     fun MyString_new(v: Slice): Pointer
@@ -35,6 +34,7 @@ class MyString internal constructor (
     companion object {
         internal val libClass: Class<MyStringLib> = MyStringLib::class.java
         internal val lib: MyStringLib = Native.load("somelib", libClass)
+        @JvmStatic
         
         fun new_(v: String): MyString {
             val (vMem, vSlice) = PrimitiveArrayTools.readUtf8(v)
@@ -47,6 +47,7 @@ class MyString internal constructor (
             if (vMem != null) vMem.close()
             return returnOpaque
         }
+        @JvmStatic
         
         fun newUnsafe(v: String): MyString {
             val (vMem, vSlice) = PrimitiveArrayTools.readUtf8(v)
@@ -59,6 +60,7 @@ class MyString internal constructor (
             if (vMem != null) vMem.close()
             return returnOpaque
         }
+        @JvmStatic
         
         fun newOwned(v: String): MyString {
             val (vMem, vSlice) = PrimitiveArrayTools.readUtf8(v)
@@ -70,6 +72,7 @@ class MyString internal constructor (
             CLEANER.register(returnOpaque, MyString.MyStringCleaner(handle, MyString.lib));
             return returnOpaque
         }
+        @JvmStatic
         
         fun newFromFirst(v: Array<String>): MyString {
             val (vMem, vSlice) = PrimitiveArrayTools.readUtf8s(v)
@@ -82,12 +85,14 @@ class MyString internal constructor (
             vMem.forEach {if (it != null) it.close()}
             return returnOpaque
         }
+        @JvmStatic
         
         fun getStaticStr(): String {
             
             val returnVal = lib.MyString_get_static_str();
                 return PrimitiveArrayTools.getUtf8(returnVal)
         }
+        @JvmStatic
         
         fun stringTransform(foo: String): String {
             val (fooMem, fooSlice) = PrimitiveArrayTools.readUtf8(foo)

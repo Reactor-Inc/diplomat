@@ -3,34 +3,26 @@ import wasm from "./diplomat-wasm.mjs";
 import * as diplomatRuntime from "./diplomat-runtime.mjs";
 
 
-/** 
+
+/**
  * Testing JS-specific layout/padding behavior
  */
-
-
 export class ScalarPairWithPadding {
-    
     #first;
-    
-    get first()  {
+    get first() {
         return this.#first;
-    } 
-    set first(value) {
+    }
+    set first(value){
         this.#first = value;
     }
-    
     #second;
-    
-    get second()  {
+    get second() {
         return this.#second;
-    } 
-    set second(value) {
+    }
+    set second(value){
         this.#second = value;
     }
-    
-    /** Create `ScalarPairWithPadding` from an object that contains all of `ScalarPairWithPadding`s fields.
-    * Optional fields do not need to be included in the provided object.
-    */
+    /** @internal */
     static fromFields(structObj) {
         return new ScalarPairWithPadding(structObj);
     }
@@ -57,16 +49,17 @@ export class ScalarPairWithPadding {
 
     // Return this struct in FFI function friendly format.
     // Returns an array that can be expanded with spread syntax (...)
-    
-    // JS structs need to be generated with or without padding depending on whether they are being passed as aggregates or splatted out into fields.
-    // Most of the time this is known beforehand: large structs (>2 scalar fields) always get padding, and structs passed directly in parameters omit padding
-    // if they are small. However small structs within large structs also get padding, and we signal that by setting forcePadding.
     _intoFFI(
         functionCleanupArena,
-        appendArrayMap,
-        forcePadding
+        appendArrayMap
     ) {
-        return [this.#first, ...diplomatRuntime.maybePaddingFields(forcePadding, 3 /* x i8 */), this.#second]
+        let buffer = diplomatRuntime.DiplomatBuf.struct(wasm, 8, 4);
+
+        this._writeToArrayBuffer(wasm.memory.buffer, buffer.ptr, functionCleanupArena, appendArrayMap);
+
+        functionCleanupArena.alloc(buffer);
+
+        return buffer.ptr;
     }
 
     static _fromSuppliedValue(internalConstructor, obj) {
@@ -85,8 +78,7 @@ export class ScalarPairWithPadding {
         arrayBuffer,
         offset,
         functionCleanupArena,
-        appendArrayMap,
-        forcePadding
+        appendArrayMap
     ) {
         diplomatRuntime.writeToArrayBuffer(arrayBuffer, offset + 0, this.#first, Uint8Array);
         diplomatRuntime.writeToArrayBuffer(arrayBuffer, offset + 4, this.#second, Uint32Array);
@@ -109,14 +101,18 @@ export class ScalarPairWithPadding {
 
         return new ScalarPairWithPadding(structObj);
     }
-assertValue() {
+
+
+    assertValue() {
         let functionCleanupArena = new diplomatRuntime.CleanupArena();
-        wasm.ScalarPairWithPadding_assert_value(...ScalarPairWithPadding._fromSuppliedValue(diplomatRuntime.internalConstructor, this)._intoFFI(functionCleanupArena, {}));
-    
+
+    wasm.ScalarPairWithPadding_assert_value(ScalarPairWithPadding._fromSuppliedValue(diplomatRuntime.internalConstructor, this)._intoFFI(functionCleanupArena, {}, false));
+
         try {}
-        
+
         finally {
             functionCleanupArena.free();
+
         }
     }
 

@@ -2,24 +2,26 @@
 import type { CyclicStructA } from "./CyclicStructA"
 import type { pointer, codepoint } from "./diplomat-runtime.d.ts";
 
-type CyclicStructB_obj = {
+export type CyclicStructB_obj = {
     field: number;
 };
 
 
 
 export class CyclicStructB {
-    
-    get field() : number; 
-    set field(value: number); 
-    
-    /** Create `CyclicStructB` from an object that contains all of `CyclicStructB`s fields.
-    * Optional fields do not need to be included in the provided object.
-    */
+    get field(): number;
+    set field(value: number);
+    /** @internal */
     static fromFields(structObj : CyclicStructB_obj) : CyclicStructB;
 
-static getA(): CyclicStructA;
-static getAOption(): CyclicStructA | null;
+    /**
+    * Create `CyclicStructB` from an object that contains all of `CyclicStructB`s fields.
+    * Optional fields do not need to be included in the provided object.
+    */
+    constructor(structObj: CyclicStructB_obj);
 
-    constructor(structObj : CyclicStructB_obj);
+
+    static getA(): CyclicStructA;
+
+    static getAOption(): CyclicStructA | null;
 }

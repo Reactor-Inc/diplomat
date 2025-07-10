@@ -46,6 +46,7 @@ pub(crate) fn attr_support() -> BackendAttrSupport {
     a.custom_errors = true;
     a.traits_are_send = true;
     a.traits_are_sync = true;
+    a.generate_mocking_interface = true;
 
     a
 }
@@ -584,9 +585,9 @@ return string{return_type_modifier}"#
         )
     }
 
-    fn gen_slice_return_conversion<'d>(
+    fn gen_slice_return_conversion<'d, P: TyPosition>(
         &'d self,
-        slice_ty: &'d Slice,
+        slice_ty: &'d Slice<P>,
         val_name: &'d str,
         return_type_modifier: &str,
     ) -> String {
@@ -960,10 +961,10 @@ returnVal.option() ?: return null
         }
     }
 
-    fn gen_slice_conversion(
+    fn gen_slice_conversion<P: TyPosition>(
         &self,
         kt_param_name: Cow<'cx, str>,
-        slice_type: Slice,
+        slice_type: Slice<P>,
     ) -> Cow<'cx, str> {
         #[derive(Template)]
         #[template(path = "kotlin/SliceConversion.kt.jinja", escape = "none")]
@@ -995,7 +996,11 @@ returnVal.option() ?: return null
         .into()
     }
 
-    fn gen_cleanup(&self, param_name: Cow<'cx, str>, slice: Slice) -> Option<Cow<'cx, str>> {
+    fn gen_cleanup<P: TyPosition>(
+        &self,
+        param_name: Cow<'cx, str>,
+        slice: Slice<P>,
+    ) -> Option<Cow<'cx, str>> {
         match slice {
             Slice::Str(Some(_), _) => {
                 Some(format!("if ({param_name}Mem != null) {param_name}Mem.close()").into())
@@ -1019,9 +1024,10 @@ returnVal.option() ?: return null
         self_type: Option<&'cx SelfType>,
         struct_name: Option<&str>,
         use_finalizers_not_cleaners: bool,
-    ) -> String {
+        add_override_specifier_for_opaque_self_methods: bool,
+    ) -> MethodInfo {
         if method.attrs.disable {
-            return "".into();
+            return MethodInfo::default();
         }
 
         let mut visitor = method.borrowing_param_visitor(self.tcx, false);
@@ -1066,14 +1072,17 @@ returnVal.option() ?: return null
 
             match &param.ty {
                 Type::Slice(slice) => {
-                    slice_conversions.push(self.gen_slice_conversion(param_name.clone(), *slice));
+                    slice_conversions
+                        .push(self.gen_slice_conversion(param_name.clone(), slice.clone()));
 
                     let param_borrow_kind = visitor.visit_param(&param.ty, &param_name);
 
                     match param_borrow_kind {
                         ParamBorrowInfo::Struct(_) => (),
                         ParamBorrowInfo::TemporarySlice => {
-                            if let Some(cleanup) = self.gen_cleanup(param_name.clone(), *slice) {
+                            if let Some(cleanup) =
+                                self.gen_cleanup(param_name.clone(), slice.clone())
+                            {
                                 cleanups.push(cleanup)
                             }
                         }
@@ -1156,6 +1165,7 @@ returnVal.option() ?: return null
                         ),
                         None => ("Unit".into(), "".into()),
                     };
+
                     self.callback_params.push(CallbackParamInfo {
                         name: "DiplomatCallback_".to_owned() + &additional_name.clone().unwrap(),
                         input_types: param_input_types.join(", "),
@@ -1274,18 +1284,23 @@ returnVal.option() ?: return null
             }
         };
 
-        MethodTpl {
+        let definition = MethodTpl {
             // todo: comment,
-            declaration,
+            declaration: declaration.clone(),
             native_method_name,
             param_conversions,
             return_expression,
             write_return,
             slice_conversions,
             docs: self.formatter.fmt_docs(&method.docs),
+            add_override_specifier_for_opaque_self_methods,
         }
         .render()
-        .expect("Failed to render string for method")
+        .expect("Failed to render string for method");
+        MethodInfo {
+            declaration,
+            definition,
+        }
     }
 
     fn gen_native_method_info(
@@ -1377,6 +1392,7 @@ returnVal.option() ?: return null
                     Some(self_param),
                     None,
                     use_finalizers_not_cleaners,
+                    ty.attrs.generate_mocking_interface, // Add override specifier when interface is generated for opaque self methods
                 )
             })
             .collect::<Vec<_>>();
@@ -1392,8 +1408,9 @@ returnVal.option() ?: return null
                     &mut unused_special_methods,
                     method,
                     None,
-                    None,
+                    Some(type_name),
                     use_finalizers_not_cleaners,
+                    false, // Add override specifier when interface is generated for opaque self methods
                 )
             })
             .collect::<Vec<_>>();
@@ -1416,8 +1433,8 @@ returnVal.option() ?: return null
             lib_name: &'a str,
             type_name: &'a str,
             dtor_abi_name: &'a str,
-            self_methods: &'a [String],
-            companion_methods: &'a [String],
+            self_methods: &'a [MethodInfo],
+            companion_methods: &'a [MethodInfo],
             native_methods: &'a [NativeMethodInfo],
             lifetimes: Vec<Cow<'a, str>>,
             special_methods: SpecialMethodsImpl,
@@ -1425,6 +1442,7 @@ returnVal.option() ?: return null
             use_finalizers_not_cleaners: bool,
             docs: String,
             is_custom_error: bool,
+            generate_mocking_interface: bool,
         }
 
         (
@@ -1443,6 +1461,8 @@ returnVal.option() ?: return null
                 use_finalizers_not_cleaners,
                 docs: self.formatter.fmt_docs(&ty.docs),
                 is_custom_error: ty.attrs.custom_errors,
+                generate_mocking_interface: (ty.attrs.generate_mocking_interface
+                    && !self_methods.is_empty()),
             }
             .render()
             .expect("failed to generate struct"),
@@ -1481,6 +1501,7 @@ returnVal.option() ?: return null
                     Some(self_param),
                     Some(type_name),
                     use_finalizers_not_cleaners,
+                    false, // Add override specifier when interface is generated for opaque self methods
                 )
             })
             .collect::<Vec<_>>();
@@ -1496,6 +1517,7 @@ returnVal.option() ?: return null
                     None,
                     Some(type_name),
                     use_finalizers_not_cleaners,
+                    false, // Add override specifier when interface is generated for opaque self methods
                 )
             })
             .collect::<Vec<_>>();
@@ -1527,8 +1549,8 @@ returnVal.option() ?: return null
             lib_name: &'a str,
             type_name: &'a str,
             fields: Vec<StructFieldDef<'a>>,
-            self_methods: &'a [String],
-            companion_methods: &'a [String],
+            self_methods: &'a [MethodInfo],
+            companion_methods: &'a [MethodInfo],
             native_methods: &'a [NativeMethodInfo],
             callback_params: &'a [CallbackParamInfo],
             lifetimes: Vec<Cow<'a, str>>,
@@ -1762,6 +1784,7 @@ returnVal.option() ?: return null
                     Some(self_param),
                     None,
                     use_finalizers_not_cleaners,
+                    false, // Add override specifier when interface is generated for opaque self methods
                 )
             })
             .collect::<Vec<_>>();
@@ -1778,6 +1801,7 @@ returnVal.option() ?: return null
                     None,
                     None,
                     use_finalizers_not_cleaners,
+                    false, // Add override specifier when interface is generated for opaque self methods
                 )
             })
             .collect::<Vec<_>>();
@@ -1840,8 +1864,8 @@ returnVal.option() ?: return null
             domain: Cow<'d, str>,
             type_name: Cow<'d, str>,
             variants: &'d EnumVariants<'d>,
-            self_methods: &'d [String],
-            companion_methods: &'d [String],
+            self_methods: &'d [MethodInfo],
+            companion_methods: &'d [MethodInfo],
             native_methods: &'d [NativeMethodInfo],
             callback_params: &'d [CallbackParamInfo],
             is_custom_error: bool,
@@ -2047,6 +2071,13 @@ struct MethodTpl<'a> {
     write_return: bool,
     slice_conversions: Vec<Cow<'a, str>>,
     docs: String,
+    add_override_specifier_for_opaque_self_methods: bool,
+}
+
+#[derive(Default)]
+struct MethodInfo {
+    declaration: String,
+    definition: String,
 }
 
 struct NativeMethodInfo {
@@ -2148,7 +2179,7 @@ mod test {
             let type_name = enum_def.name.to_string();
             // test that we can render and that it doesn't panic
             let (_, enum_code) =
-                ty_gen_cx.gen_enum_def(enum_def, &type_name, "dev.gigapixel", "somelib", false);
+                ty_gen_cx.gen_enum_def(enum_def, &type_name, "dev.diplomattest", "somelib", false);
             insta::assert_snapshot!(enum_code)
         }
     }
@@ -2236,7 +2267,7 @@ mod test {
             let type_name = strct.name.to_string();
             // test that we can render and that it doesn't panic
             let (_, struct_code) =
-                ty_gen_cx.gen_struct_def(strct, &type_name, "dev.gigapixel", "somelib", false);
+                ty_gen_cx.gen_struct_def(strct, &type_name, "dev.diplomattest", "somelib", false);
             insta::assert_snapshot!(struct_code)
         }
     }
@@ -2287,8 +2318,13 @@ mod test {
             };
             let type_name = opaque_def.name.to_string();
             // test that we can render and that it doesn't panic
-            let (_, result) =
-                ty_gen_cx.gen_opaque_def(opaque_def, &type_name, "dev.gigapixel", "somelib", false);
+            let (_, result) = ty_gen_cx.gen_opaque_def(
+                opaque_def,
+                &type_name,
+                "dev.diplomattest",
+                "somelib",
+                false,
+            );
             insta::assert_snapshot!(result)
         }
     }
@@ -2396,8 +2432,13 @@ mod test {
             };
             let type_name = opaque_def.name.to_string();
             // test that we can render and that it doesn't panic
-            let (_, result) =
-                ty_gen_cx.gen_opaque_def(opaque_def, &type_name, "dev.gigapixel", "somelib", false);
+            let (_, result) = ty_gen_cx.gen_opaque_def(
+                opaque_def,
+                &type_name,
+                "dev.diplomattest",
+                "somelib",
+                false,
+            );
             insta::assert_snapshot!(result)
         }
     }
@@ -2447,8 +2488,13 @@ mod test {
             };
             let type_name = opaque_def.name.to_string();
             // test that we can render and that it doesn't panic
-            let (_, result) =
-                ty_gen_cx.gen_opaque_def(opaque_def, &type_name, "dev.gigapixel", "somelib", true);
+            let (_, result) = ty_gen_cx.gen_opaque_def(
+                opaque_def,
+                &type_name,
+                "dev.diplomattest",
+                "somelib",
+                true,
+            );
             insta::assert_snapshot!(result)
         }
     }
@@ -2512,7 +2558,64 @@ mod test {
         let trait_name = trait_def.name.to_string();
         // test that we can render and that it doesn't panic
         let (_, result) =
-            ty_gen_cx.gen_trait_def(trait_def, &trait_name, "dev.gigapixel", "somelib");
+            ty_gen_cx.gen_trait_def(trait_def, &trait_name, "dev.diplomattest", "somelib");
         insta::assert_snapshot!(result)
+    }
+
+    #[test]
+    fn test_opaque_gen_with_mocking_interface() {
+        let tk_stream = quote! {
+            #[diplomat::bridge]
+            mod ffi {
+                #[diplomat::opaque]
+                #[diplomat::attr(kotlin_test, generate_mocking_interface)]
+                struct MyOpaqueStruct<'b> {
+                    a: SomeExternalType
+                }
+
+                impl<'b> MyOpaqueStruct<'b> {
+
+                    pub fn get_byte() -> u8 {
+                        unimplemented!()
+                    }
+
+                    pub fn get_string_wrapper(in1: i32) -> i32 {
+                        unimplemented!()
+                    }
+                }
+
+            }
+        };
+        let tcx = new_tcx(tk_stream);
+        let mut all_types = tcx.all_types();
+        if let (_id, TypeDef::Opaque(opaque_def)) = all_types
+            .next()
+            .expect("Failed to generate first opaque def")
+        {
+            let eror_store = ErrorStore::default();
+            let docs_urls = HashMap::new();
+            let docs_generator =
+                diplomat_core::hir::DocsUrlGenerator::with_base_urls(None, docs_urls);
+            let formatter = KotlinFormatter::new(&tcx, None, &docs_generator);
+            let mut callback_params = Vec::new();
+            let mut ty_gen_cx = TyGenContext {
+                tcx: &tcx,
+                formatter: &formatter,
+                result_types: RefCell::new(BTreeSet::new()),
+                option_types: RefCell::new(BTreeSet::new()),
+                errors: &eror_store,
+                callback_params: &mut callback_params,
+            };
+            let type_name = opaque_def.name.to_string();
+            // test that we can render and that it doesn't panic
+            let (_, result) = ty_gen_cx.gen_opaque_def(
+                opaque_def,
+                &type_name,
+                "dev.diplomattest",
+                "somelib",
+                true,
+            );
+            insta::assert_snapshot!(result)
+        }
     }
 }

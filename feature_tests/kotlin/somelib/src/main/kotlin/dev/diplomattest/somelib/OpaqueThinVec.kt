@@ -5,7 +5,6 @@ import com.sun.jna.Native
 import com.sun.jna.Pointer
 import com.sun.jna.Structure
 
-
 internal interface OpaqueThinVecLib: Library {
     fun OpaqueThinVec_destroy(handle: Pointer)
     fun OpaqueThinVec_create(a: Slice, b: Slice): Pointer
@@ -31,6 +30,7 @@ class OpaqueThinVec internal constructor (
     companion object {
         internal val libClass: Class<OpaqueThinVecLib> = OpaqueThinVecLib::class.java
         internal val lib: OpaqueThinVecLib = Native.load("somelib", libClass)
+        @JvmStatic
         
         fun create(a: IntArray, b: FloatArray): OpaqueThinVec {
             val (aMem, aSlice) = PrimitiveArrayTools.native(a)

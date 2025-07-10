@@ -10,22 +10,22 @@
 #include <memory>
 #include <functional>
 #include <optional>
+#include <cstdlib>
 #include "diplomat_runtime.hpp"
 
 
 namespace diplomat {
 namespace capi {
     extern "C" {
-    
+
     diplomat::capi::Utf16Wrap* Utf16Wrap_from_utf16(diplomat::capi::DiplomatString16View input);
-    
+
     void Utf16Wrap_get_debug_str(const diplomat::capi::Utf16Wrap* self, diplomat::capi::DiplomatWrite* write);
-    
+
     diplomat::capi::DiplomatString16View Utf16Wrap_borrow_cont(const diplomat::capi::Utf16Wrap* self);
-    
-    
+
     void Utf16Wrap_destroy(Utf16Wrap* self);
-    
+
     } // extern "C"
 } // namespace capi
 } // namespace
@@ -41,6 +41,12 @@ inline std::string Utf16Wrap::get_debug_str() const {
   diplomat::capi::Utf16Wrap_get_debug_str(this->AsFFI(),
     &write);
   return output;
+}
+template<typename W>
+inline void Utf16Wrap::get_debug_str_write(W& writeable) const {
+  diplomat::capi::DiplomatWrite write = diplomat::WriteTrait<W>::Construct(writeable);
+  diplomat::capi::Utf16Wrap_get_debug_str(this->AsFFI(),
+    &write);
 }
 
 inline std::u16string_view Utf16Wrap::borrow_cont() const {

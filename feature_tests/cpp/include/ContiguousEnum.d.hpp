@@ -8,6 +8,7 @@
 #include <memory>
 #include <functional>
 #include <optional>
+#include <cstdlib>
 #include "diplomat_runtime.hpp"
 
 
@@ -19,7 +20,7 @@ namespace capi {
       ContiguousEnum_E = 2,
       ContiguousEnum_F = 3,
     };
-    
+
     typedef struct ContiguousEnum_option {union { ContiguousEnum ok; }; bool is_ok; } ContiguousEnum_option;
 } // namespace capi
 } // namespace
@@ -33,7 +34,8 @@ public:
     F = 3,
   };
 
-  ContiguousEnum() = default;
+  ContiguousEnum(): value(Value::E) {}
+
   // Implicit conversions between enum and ::Value
   constexpr ContiguousEnum(Value v) : value(v) {}
   constexpr operator Value() const { return value; }

@@ -10,24 +10,24 @@
 #include <memory>
 #include <functional>
 #include <optional>
+#include <cstdlib>
 #include "diplomat_runtime.hpp"
 
 
 namespace diplomat {
 namespace capi {
     extern "C" {
-    
+
     diplomat::capi::OptionString* OptionString_new(diplomat::capi::DiplomatStringView diplomat_str);
-    
+
     typedef struct OptionString_write_result { bool is_ok;} OptionString_write_result;
     OptionString_write_result OptionString_write(const diplomat::capi::OptionString* self, diplomat::capi::DiplomatWrite* write);
-    
+
     typedef struct OptionString_borrow_result {union {diplomat::capi::DiplomatStringView ok; }; bool is_ok;} OptionString_borrow_result;
     OptionString_borrow_result OptionString_borrow(const diplomat::capi::OptionString* self);
-    
-    
+
     void OptionString_destroy(OptionString* self);
-    
+
     } // extern "C"
 } // namespace capi
 } // namespace
@@ -43,6 +43,13 @@ inline diplomat::result<std::string, std::monostate> OptionString::write() const
   auto result = diplomat::capi::OptionString_write(this->AsFFI(),
     &write);
   return result.is_ok ? diplomat::result<std::string, std::monostate>(diplomat::Ok<std::string>(std::move(output))) : diplomat::result<std::string, std::monostate>(diplomat::Err<std::monostate>());
+}
+template<typename W>
+inline diplomat::result<std::monostate, std::monostate> OptionString::write_write(W& writeable) const {
+  diplomat::capi::DiplomatWrite write = diplomat::WriteTrait<W>::Construct(writeable);
+  auto result = diplomat::capi::OptionString_write(this->AsFFI(),
+    &write);
+  return result.is_ok ? diplomat::result<std::monostate, std::monostate>(diplomat::Ok<std::monostate>()) : diplomat::result<std::monostate, std::monostate>(diplomat::Err<std::monostate>());
 }
 
 inline std::optional<std::string_view> OptionString::borrow() const {

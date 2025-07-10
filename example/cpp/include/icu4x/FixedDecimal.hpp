@@ -10,23 +10,23 @@
 #include <memory>
 #include <functional>
 #include <optional>
+#include <cstdlib>
 #include "../diplomat_runtime.hpp"
 
 
 namespace icu4x {
 namespace capi {
     extern "C" {
-    
+
     icu4x::capi::FixedDecimal* icu4x_FixedDecimal_new_mv1(int32_t v);
-    
+
     void icu4x_FixedDecimal_multiply_pow10_mv1(icu4x::capi::FixedDecimal* self, int16_t power);
-    
+
     typedef struct icu4x_FixedDecimal_to_string_mv1_result { bool is_ok;} icu4x_FixedDecimal_to_string_mv1_result;
     icu4x_FixedDecimal_to_string_mv1_result icu4x_FixedDecimal_to_string_mv1(const icu4x::capi::FixedDecimal* self, diplomat::capi::DiplomatWrite* write);
-    
-    
+
     void icu4x_FixedDecimal_destroy_mv1(FixedDecimal* self);
-    
+
     } // extern "C"
 } // namespace capi
 } // namespace
@@ -47,6 +47,13 @@ inline diplomat::result<std::string, std::monostate> icu4x::FixedDecimal::to_str
   auto result = icu4x::capi::icu4x_FixedDecimal_to_string_mv1(this->AsFFI(),
     &write);
   return result.is_ok ? diplomat::result<std::string, std::monostate>(diplomat::Ok<std::string>(std::move(output))) : diplomat::result<std::string, std::monostate>(diplomat::Err<std::monostate>());
+}
+template<typename W>
+inline diplomat::result<std::monostate, std::monostate> icu4x::FixedDecimal::to_string_write(W& writeable) const {
+  diplomat::capi::DiplomatWrite write = diplomat::WriteTrait<W>::Construct(writeable);
+  auto result = icu4x::capi::icu4x_FixedDecimal_to_string_mv1(this->AsFFI(),
+    &write);
+  return result.is_ok ? diplomat::result<std::monostate, std::monostate>(diplomat::Ok<std::monostate>()) : diplomat::result<std::monostate, std::monostate>(diplomat::Err<std::monostate>());
 }
 
 inline const icu4x::capi::FixedDecimal* icu4x::FixedDecimal::AsFFI() const {

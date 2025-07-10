@@ -17,7 +17,7 @@ internal class NestedBorrowedFieldsNative: Structure(), Structure.ByValue {
     internal var bounds: BorrowedFieldsWithBoundsNative = BorrowedFieldsWithBoundsNative();
     @JvmField
     internal var bounds2: BorrowedFieldsWithBoundsNative = BorrowedFieldsWithBoundsNative();
-  
+
     // Define the fields of the struct
     override fun getFieldOrder(): List<String> {
         return listOf("fields", "bounds", "bounds2")
@@ -38,6 +38,7 @@ class NestedBorrowedFields internal constructor (
         internal val libClass: Class<NestedBorrowedFieldsLib> = NestedBorrowedFieldsLib::class.java
         internal val lib: NestedBorrowedFieldsLib = Native.load("somelib", libClass)
         val NATIVESIZE: Long = Native.getNativeSize(NestedBorrowedFieldsNative::class.java).toLong()
+        @JvmStatic
         
         fun fromBarAndFooAndStrings(bar: Bar, foo: Foo, dstr16X: String, dstr16Z: String, utf8StrY: String, utf8StrZ: String): NestedBorrowedFields {
             val (dstr16XMem, dstr16XSlice) = PrimitiveArrayTools.readUtf16(dstr16X)

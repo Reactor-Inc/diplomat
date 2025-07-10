@@ -5,7 +5,6 @@ import com.sun.jna.Native
 import com.sun.jna.Pointer
 import com.sun.jna.Structure
 
-
 internal interface FooLib: Library {
     fun Foo_destroy(handle: Pointer)
     fun Foo_new(x: Slice): Pointer
@@ -33,6 +32,7 @@ class Foo internal constructor (
     companion object {
         internal val libClass: Class<FooLib> = FooLib::class.java
         internal val lib: FooLib = Native.load("somelib", libClass)
+        @JvmStatic
         
         fun new_(x: String): Foo {
             val (xMem, xSlice) = PrimitiveArrayTools.readUtf8(x)
@@ -45,6 +45,7 @@ class Foo internal constructor (
             CLEANER.register(returnOpaque, Foo.FooCleaner(handle, Foo.lib));
             return returnOpaque
         }
+        @JvmStatic
         
         fun newStatic(x: String): Foo {
             val (xMem, xSlice) = PrimitiveArrayTools.readUtf8(x)
@@ -58,6 +59,7 @@ class Foo internal constructor (
             if (xMem != null) xMem.close()
             return returnOpaque
         }
+        @JvmStatic
         
         fun extractFromFields(fields: BorrowedFields): Foo {
             
@@ -69,6 +71,7 @@ class Foo internal constructor (
             CLEANER.register(returnOpaque, Foo.FooCleaner(handle, Foo.lib));
             return returnOpaque
         }
+        @JvmStatic
         
         /** Test that the extraction logic correctly pins the right fields
         */

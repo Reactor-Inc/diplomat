@@ -10,20 +10,20 @@
 #include <memory>
 #include <functional>
 #include <optional>
+#include <cstdlib>
 #include "diplomat_runtime.hpp"
 
 
 namespace diplomat {
 namespace capi {
     extern "C" {
-    
+
     diplomat::capi::MyOpaqueEnum* MyOpaqueEnum_new(void);
-    
+
     void MyOpaqueEnum_to_string(const diplomat::capi::MyOpaqueEnum* self, diplomat::capi::DiplomatWrite* write);
-    
-    
+
     void MyOpaqueEnum_destroy(MyOpaqueEnum* self);
-    
+
     } // extern "C"
 } // namespace capi
 } // namespace
@@ -39,6 +39,12 @@ inline std::string MyOpaqueEnum::to_string() const {
   diplomat::capi::MyOpaqueEnum_to_string(this->AsFFI(),
     &write);
   return output;
+}
+template<typename W>
+inline void MyOpaqueEnum::to_string_write(W& writeable) const {
+  diplomat::capi::DiplomatWrite write = diplomat::WriteTrait<W>::Construct(writeable);
+  diplomat::capi::MyOpaqueEnum_to_string(this->AsFFI(),
+    &write);
 }
 
 inline const diplomat::capi::MyOpaqueEnum* MyOpaqueEnum::AsFFI() const {

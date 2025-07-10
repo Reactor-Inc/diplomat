@@ -8,6 +8,7 @@
 #include <memory>
 #include <functional>
 #include <optional>
+#include <cstdlib>
 #include "diplomat_runtime.hpp"
 
 
@@ -23,6 +24,8 @@ public:
   inline static std::unique_ptr<MyOpaqueEnum> new_();
 
   inline std::string to_string() const;
+  template<typename W>
+  inline void to_string_write(W& writeable_output) const;
 
   inline const diplomat::capi::MyOpaqueEnum* AsFFI() const;
   inline diplomat::capi::MyOpaqueEnum* AsFFI();

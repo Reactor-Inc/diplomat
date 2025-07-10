@@ -4,8 +4,13 @@ import type { pointer, codepoint } from "./diplomat-runtime.d.ts";
 
 
 export class MyOpaqueEnum {
-    
+    /** @internal */
     get ffiValue(): pointer;
-static new_(): MyOpaqueEnum;
-toString(): string;
+    /** @internal */
+    constructor();
+
+
+    static new_(): MyOpaqueEnum;
+
+    toString(): string;
 }

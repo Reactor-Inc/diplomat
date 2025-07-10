@@ -16,7 +16,7 @@ internal interface CallbackWrapperLib: Library {
 internal class CallbackWrapperNative: Structure(), Structure.ByValue {
     @JvmField
     internal var cantBeEmpty: Byte = 0;
-  
+
     // Define the fields of the struct
     override fun getFieldOrder(): List<String> {
         return listOf("cantBeEmpty")
@@ -59,7 +59,7 @@ internal class DiplomatCallback_CallbackWrapper_test_multi_arg_callback_diplomat
 
     companion object {
         val NATIVESIZE: Long = Native.getNativeSize(DiplomatCallback_CallbackWrapper_test_multi_arg_callback_diplomatCallback_f_Native::class.java).toLong()
-        
+
         fun fromCallback(cb: (Int)->Int): DiplomatCallback_CallbackWrapper_test_multi_arg_callback_diplomatCallback_f {
             val callback: Runner_DiplomatCallback_CallbackWrapper_test_multi_arg_callback_diplomatCallback_f = object :  Runner_DiplomatCallback_CallbackWrapper_test_multi_arg_callback_diplomatCallback_f {
                 override fun invoke(lang_specific_context: Pointer?, arg0: Int ): Int {
@@ -108,7 +108,7 @@ internal class DiplomatCallback_CallbackWrapper_test_no_args_diplomatCallback_h 
 
     companion object {
         val NATIVESIZE: Long = Native.getNativeSize(DiplomatCallback_CallbackWrapper_test_no_args_diplomatCallback_h_Native::class.java).toLong()
-        
+
         fun fromCallback(cb: ()->Unit): DiplomatCallback_CallbackWrapper_test_no_args_diplomatCallback_h {
             val callback: Runner_DiplomatCallback_CallbackWrapper_test_no_args_diplomatCallback_h = object :  Runner_DiplomatCallback_CallbackWrapper_test_no_args_diplomatCallback_h {
                 override fun invoke(lang_specific_context: Pointer?): Unit {
@@ -157,7 +157,7 @@ internal class DiplomatCallback_CallbackWrapper_test_cb_with_struct_diplomatCall
 
     companion object {
         val NATIVESIZE: Long = Native.getNativeSize(DiplomatCallback_CallbackWrapper_test_cb_with_struct_diplomatCallback_f_Native::class.java).toLong()
-        
+
         fun fromCallback(cb: (CallbackTestingStruct)->Int): DiplomatCallback_CallbackWrapper_test_cb_with_struct_diplomatCallback_f {
             val callback: Runner_DiplomatCallback_CallbackWrapper_test_cb_with_struct_diplomatCallback_f = object :  Runner_DiplomatCallback_CallbackWrapper_test_cb_with_struct_diplomatCallback_f {
                 override fun invoke(lang_specific_context: Pointer?, arg0: CallbackTestingStructNative ): Int {
@@ -206,7 +206,7 @@ internal class DiplomatCallback_CallbackWrapper_test_multiple_cb_args_diplomatCa
 
     companion object {
         val NATIVESIZE: Long = Native.getNativeSize(DiplomatCallback_CallbackWrapper_test_multiple_cb_args_diplomatCallback_f_Native::class.java).toLong()
-        
+
         fun fromCallback(cb: ()->Int): DiplomatCallback_CallbackWrapper_test_multiple_cb_args_diplomatCallback_f {
             val callback: Runner_DiplomatCallback_CallbackWrapper_test_multiple_cb_args_diplomatCallback_f = object :  Runner_DiplomatCallback_CallbackWrapper_test_multiple_cb_args_diplomatCallback_f {
                 override fun invoke(lang_specific_context: Pointer?): Int {
@@ -255,7 +255,7 @@ internal class DiplomatCallback_CallbackWrapper_test_multiple_cb_args_diplomatCa
 
     companion object {
         val NATIVESIZE: Long = Native.getNativeSize(DiplomatCallback_CallbackWrapper_test_multiple_cb_args_diplomatCallback_g_Native::class.java).toLong()
-        
+
         fun fromCallback(cb: (Int)->Int): DiplomatCallback_CallbackWrapper_test_multiple_cb_args_diplomatCallback_g {
             val callback: Runner_DiplomatCallback_CallbackWrapper_test_multiple_cb_args_diplomatCallback_g = object :  Runner_DiplomatCallback_CallbackWrapper_test_multiple_cb_args_diplomatCallback_g {
                 override fun invoke(lang_specific_context: Pointer?, arg0: Int ): Int {
@@ -277,24 +277,28 @@ class CallbackWrapper internal constructor (
         internal val libClass: Class<CallbackWrapperLib> = CallbackWrapperLib::class.java
         internal val lib: CallbackWrapperLib = Native.load("somelib", libClass)
         val NATIVESIZE: Long = Native.getNativeSize(CallbackWrapperNative::class.java).toLong()
+        @JvmStatic
         
         fun testMultiArgCallback(f: (Int)->Int, x: Int): Int {
             
             val returnVal = lib.CallbackWrapper_test_multi_arg_callback(DiplomatCallback_CallbackWrapper_test_multi_arg_callback_diplomatCallback_f.fromCallback(f).nativeStruct, x);
             return (returnVal)
         }
+        @JvmStatic
         
         fun testNoArgs(h: ()->Unit): Int {
             
             val returnVal = lib.CallbackWrapper_test_no_args(DiplomatCallback_CallbackWrapper_test_no_args_diplomatCallback_h.fromCallback(h).nativeStruct);
             return (returnVal)
         }
+        @JvmStatic
         
         fun testCbWithStruct(f: (CallbackTestingStruct)->Int): Int {
             
             val returnVal = lib.CallbackWrapper_test_cb_with_struct(DiplomatCallback_CallbackWrapper_test_cb_with_struct_diplomatCallback_f.fromCallback(f).nativeStruct);
             return (returnVal)
         }
+        @JvmStatic
         
         fun testMultipleCbArgs(f: ()->Int, g: (Int)->Int): Int {
             

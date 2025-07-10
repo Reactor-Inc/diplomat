@@ -1,7 +1,8 @@
 //! This module contains functions for formatting types
 
 use diplomat_core::hir::{
-    self, DocsUrlGenerator, StringEncoding, SymbolId, TraitId, TyPosition, TypeContext, TypeId,
+    self, DocsTypeReferenceSyntax, DocsUrlGenerator, StringEncoding, SymbolId, TraitId, TyPosition,
+    TypeContext, TypeId,
 };
 use std::borrow::Cow;
 use std::sync::LazyLock;
@@ -200,7 +201,7 @@ impl<'tcx> CFormatter<'tcx> {
             PrimitiveType::Bool => "bool",
 
             PrimitiveType::Char => "char32_t",
-            PrimitiveType::Int(IntType::I8) => "int8_t",
+            PrimitiveType::Int(IntType::I8) | PrimitiveType::Ordering => "int8_t",
             PrimitiveType::Int(IntType::U8) | PrimitiveType::Byte => "uint8_t",
             PrimitiveType::Int(IntType::I16) => "int16_t",
             PrimitiveType::Int(IntType::U16) => "uint16_t",
@@ -223,7 +224,7 @@ impl<'tcx> CFormatter<'tcx> {
         match prim {
             PrimitiveType::Bool => "Bool",
             PrimitiveType::Char => "Char",
-            PrimitiveType::Int(IntType::I8) => "I8",
+            PrimitiveType::Int(IntType::I8) | PrimitiveType::Ordering => "I8",
             PrimitiveType::Int(IntType::U8) | PrimitiveType::Byte => "U8",
             PrimitiveType::Int(IntType::I16) => "I16",
             PrimitiveType::Int(IntType::U16) => "U16",
@@ -252,6 +253,34 @@ impl<'tcx> CFormatter<'tcx> {
         self.diplomat_namespace(format!("Diplomat{prim}View{mtb}").into())
     }
 
+    pub fn fmt_struct_slice_name<P: TyPosition>(
+        &self,
+        borrow: Option<hir::Borrow>,
+        st_ty: &P::StructPath,
+    ) -> Cow<'tcx, str> {
+        let st_id = hir::StructPathLike::id(st_ty);
+        let st_name = self.fmt_type_name(st_id);
+
+        let def = self.tcx.resolve_type(st_id);
+
+        let ns = def.attrs().namespace.clone();
+
+        let mtb = match borrow {
+            Some(borrow) if borrow.mutability.is_immutable() => "",
+            _ => "Mut",
+        };
+
+        let ty = format!("Diplomat{st_name}View{mtb}");
+
+        if self.is_for_cpp {
+            if let Some(ref ns) = ns {
+                return format!("{ns}::{CAPI_NAMESPACE}::{ty}").into();
+            }
+        }
+
+        self.diplomat_namespace(ty.into())
+    }
+
     pub(crate) fn fmt_write_name(&self) -> Cow<'tcx, str> {
         self.diplomat_namespace("DiplomatWrite".into())
     }
@@ -277,10 +306,9 @@ impl<'tcx> CFormatter<'tcx> {
     }
 
     pub(crate) fn fmt_docs(&self, docs: &hir::Docs) -> String {
-        docs.to_markdown(self.docs_url_gen)
+        docs.to_markdown(DocsTypeReferenceSyntax::AtLink, self.docs_url_gen)
             .trim()
-            .replace('\n', "\n * ")
-            .replace(" \n", "\n")
+            .to_string()
     }
 
     pub(crate) fn fmt_identifier<'a>(&self, name: Cow<'a, str>) -> Cow<'a, str> {

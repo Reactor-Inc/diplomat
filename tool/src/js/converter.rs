@@ -12,26 +12,6 @@ use std::fmt::Write;
 
 use super::gen::TyGenContext;
 
-/// The Rust-Wasm ABI currently treats structs with 1 or 2 scalar fields different from
-/// structs with more ("large" structs). Structs with 1 or 2 scalar fields are passed in as consecutive fields,
-/// whereas larger structs are passed in as an array of fields *including padding*. This choice is typically at the struct
-/// level, however a small struct found within a large struct will also need to care about padding.
-///
-/// See docs/wasm_abi_quirks.md, specifically the difference between "direct" and "padded direct" parameter passing.
-#[derive(Copy, Clone, Default, PartialEq, Eq)]
-pub(super) enum ForcePaddingStatus {
-    /// Don't force padding. For large and small structs found in arguments, who will internally make the choice
-    /// between "direct" and "padded direct" parameter passing.
-    #[default]
-    NoForce,
-    /// Force padding. For small structs found as fields in large structs, where the larger struct needs the smaller struct
-    /// to use "padded direct" parameter passing.
-    Force,
-    /// Force padding if the caller forces padding. For small structs found as fields in small structs, where we need "padded direct"
-    /// parameter passing iff the structs are eventually found in a larger struct that needs that, as opposed to being passed directly as parameters.
-    PassThrough,
-}
-
 /// Context about a struct being borrowed when doing js-to-c conversions
 /// Borrowed from dart implementation.
 pub(super) struct StructBorrowContext<'tcx> {
@@ -48,7 +28,7 @@ pub(super) struct StructBorrowContext<'tcx> {
 pub(super) enum JsToCConversionContext {
     /// We're passing the result of this directly to params, should produce a comma separated list of fields
     /// a single field, or a spread expression
-    List(ForcePaddingStatus),
+    List,
     /// Preallocating a slice CleanupArena
     /// Produces a DiplomatBuf (only for Slice types)
     SlicePrealloc,
@@ -205,7 +185,7 @@ impl<'tcx> TyGenContext<'_, 'tcx> {
                 let type_def = self.tcx.resolve_type(id);
                 match type_def {
                     hir::TypeDef::Struct(st) if st.fields.is_empty() => {
-                        format!("{type_name}.fromFields({{}}, diplomatRuntime.internalConstructor)").into()
+                        format!("new {type_name}()").into()
                     }
                     hir::TypeDef::Struct(..) => {
                         format!("{type_name}._fromFFI(diplomatRuntime.internalConstructor, {variable_name}{edges})").into()
@@ -225,7 +205,7 @@ impl<'tcx> TyGenContext<'_, 'tcx> {
                 format!("new {type_name}(diplomatRuntime.internalConstructor, {variable_name})")
                     .into()
             }
-            Type::Slice(slice) => {
+            Type::Slice(ref slice) => {
                 let edges = match slice.lifetime() {
                     Some(hir::MaybeStatic::NonStatic(lt)) => {
                         format!("{}Edges", lifetime_environment.fmt_lifetime(lt))
@@ -237,7 +217,7 @@ impl<'tcx> TyGenContext<'_, 'tcx> {
                 match slice {
                     hir::Slice::Primitive(_, primitive_type) => format!(
                         r#"Array.from(new diplomatRuntime.DiplomatSlicePrimitive(wasm, {variable_name}, "{}", {edges}).getValue())"#,
-                        self.formatter.fmt_primitive_list_view(primitive_type)
+                        self.formatter.fmt_primitive_list_view(*primitive_type)
                     )
                     .into(),
                     hir::Slice::Str(_, encoding) => format!(
@@ -484,8 +464,9 @@ impl<'tcx> TyGenContext<'_, 'tcx> {
                         (!fields_empty || (is_out && !success_empty), format!(
                         "const cause = {cause};\n    throw new globalThis.Error({message}, {{ cause }})", 
                         message = match e {
-                            Type::Enum(..) => format!("'{type_name}: ' + cause.value"),
+                            Type::Enum(..) => format!("'{type_name}.' + cause.value"),
                             Type::Struct(..) if fields_empty => format!("'{type_name}'"),
+                            Type::Primitive(..) => "cause.toString()".into(),
                             _ => format!("'{type_name}: ' + cause.toString()"),
                         },
                         ))
@@ -599,9 +580,8 @@ impl<'tcx> TyGenContext<'_, 'tcx> {
     ) -> Cow<'tcx, str> {
         match *ty {
             SelfType::Enum(..) | SelfType::Opaque(..) => "this.ffiValue".into(),
-            // The way Rust generates WebAssembly, each function that requires a self struct require us to pass in each parameter into the function.
-            // So we call a function in JS that lets us do this.
-            // We use spread syntax to avoid a complicated array setup.
+
+            // We just need access to the pointer, so we just make a regular _intoFFI call.
             SelfType::Struct(ref s) => {
                 let type_name = self.formatter.fmt_type_name(s.id());
 
@@ -677,33 +657,52 @@ impl<'tcx> TyGenContext<'_, 'tcx> {
                     JsToCConversionContext::SlicePrealloc => {
                         unreachable!("Used SlicePrealloc context for an Option type!");
                     }
-                    JsToCConversionContext::List(_force_padding) => {
-                        // This *always* forces padding, due to unions having quirky ABI in WASM (see wasm_abi_quirks.md section "unions")
-                        // The Option<ZST> exception is handled in type_size_alignment
-                        format!("...diplomatRuntime.optionToArgsForCalling({js_name}, {size}, {align}, (arrayBuffer, offset, jsValue) => [{inner_conversion}])").into()
+                    JsToCConversionContext::List => {
+                        let a = alloc.unwrap_or_else(|| {
+                            let id = if let Some(id) = inner.id() {
+                                self.formatter.fmt_type_name(id)
+                            } else {
+                                "()".into()
+                            };
 
+                            panic!("Expected an allocator to be specified when generating the definition for an Option<{id}>")
+                        });
+                        format!("diplomatRuntime.optionToBufferForCalling(wasm, {js_name}, {size}, {align}, {a}, (arrayBuffer, offset, jsValue) => [{inner_conversion}])").into()
                     }
                     JsToCConversionContext::WriteToBuffer(offset_var, offset) => {
                         format!("diplomatRuntime.writeOptionToArrayBuffer(arrayBuffer, {offset_var} + {offset}, {js_name}, {size}, {align}, (arrayBuffer, offset, jsValue) => {inner_conversion})").into()
                     }
                 }
             }
-            Type::Slice(slice) => {
+            Type::Slice(ref slice) => {
                 if let Some(hir::MaybeStatic::Static) = slice.lifetime() {
                     panic!("'static not supported for JS backend.")
                 } else {
-                    let alloc = alloc.expect(
-                        "Must provide some allocation anchor for slice conversion generation!",
-                    );
+                    let alloc = if slice.lifetime().is_none() {
+                        "diplomatRuntime.OwnedSliceLeaker"
+                    } else {
+                        alloc.expect("Must provide some allocation anchor for slice conversion generation!")
+                    };
+
+                    let mut alloc_stmnt = format!("{alloc}.alloc(");
+                    let mut alloc_end = ")";
+
+                    // If we're wrapping our slices for the List context (or preallocation context), we want to wrap the allocate statement around it:
+                    if matches!(gen_context, JsToCConversionContext::List | JsToCConversionContext::SlicePrealloc) {
+                        alloc_stmnt = "".into();
+                        alloc_end = "";
+                    }
 
                     let (spread_pre, spread_post) = match gen_context {
                         // SlicePreAlloc just wants the DiplomatBufe
-                        JsToCConversionContext::SlicePrealloc => ("", Cow::Borrowed("")),
+                        JsToCConversionContext::SlicePrealloc =>
+                            (format!("{alloc}.alloc(diplomatRuntime.DiplomatBuf.sliceWrapper(wasm, "), Cow::Borrowed("))")),
                         // List mode wants a list of (ptr, len)
-                        JsToCConversionContext::List(_) => ("...", ".splat()".into()),
+                        // NOTE: This is only possible in the old WASM ABI, as _intoFFI requires this splatting:
+                        JsToCConversionContext::List => ("...".into(), ".splat()".into()),
                         // WriteToBuffer needs to write to buffer arrayBuffer
                         JsToCConversionContext::WriteToBuffer(offset_var, offset) => (
-                            "",
+                            "".into(),
                             format!(
                                 ".writePtrLenToArrayBuffer(arrayBuffer, {offset_var} + {offset})"
                             )
@@ -715,22 +714,22 @@ impl<'tcx> TyGenContext<'_, 'tcx> {
                         hir::Slice::Str(_, encoding) => match encoding {
                             hir::StringEncoding::UnvalidatedUtf8
                             | hir::StringEncoding::Utf8 => {
-                                format!("{spread_pre}{alloc}.alloc(diplomatRuntime.DiplomatBuf.str8(wasm, {js_name})){spread_post}")
+                                format!("{spread_pre}{alloc_stmnt}diplomatRuntime.DiplomatBuf.str8(wasm, {js_name}){alloc_end}{spread_post}")
                             }
                             _ => {
-                                format!("{spread_pre}{alloc}.alloc(diplomatRuntime.DiplomatBuf.str16(wasm, {js_name})){spread_post}")
+                                format!("{spread_pre}{alloc_stmnt}diplomatRuntime.DiplomatBuf.str16(wasm, {js_name}){alloc_end}{spread_post}")
                             }
                         },
                         hir::Slice::Strs(encoding) => format!(
-                            r#"{spread_pre}{alloc}.alloc(diplomatRuntime.DiplomatBuf.strs(wasm, {js_name}, "{}")){spread_post}"#,
+                            r#"{spread_pre}{alloc_stmnt}diplomatRuntime.DiplomatBuf.strs(wasm, {js_name}, "{}"){alloc_end}{spread_post}"#,
                             match encoding {
                                 hir::StringEncoding::UnvalidatedUtf16 => "string16",
                                 _ => "string8",
                             }
                         ),
                         hir::Slice::Primitive(_, p) => format!(
-                            r#"{spread_pre}{alloc}.alloc(diplomatRuntime.DiplomatBuf.slice(wasm, {js_name}, "{}")){spread_post}"#,
-                            self.formatter.fmt_primitive_list_view(p)
+                            r#"{spread_pre}{alloc_stmnt}diplomatRuntime.DiplomatBuf.slice(wasm, {js_name}, "{}"){alloc_end}{spread_post}"#,
+                            self.formatter.fmt_primitive_list_view(*p)
                         ),
                         _ => unreachable!("Unknown Slice variant {ty:?}"),
                     }
@@ -782,14 +781,9 @@ impl<'tcx> TyGenContext<'_, 'tcx> {
             format!("{js_type}._fromSuppliedValue(diplomatRuntime.internalConstructor, {js_name})");
 
         match gen_context {
-            JsToCConversionContext::List(force_padding) => {
-                let force_padding = match force_padding {
-                    ForcePaddingStatus::NoForce => "",
-                    ForcePaddingStatus::Force => ", true",
-                    ForcePaddingStatus::PassThrough => ", forcePadding",
-                };
-                format!("...{js_call}._intoFFI({allocator}, {{{params}}}{force_padding})").into()
-            }
+            JsToCConversionContext::List => format!(
+                "{js_call}._intoFFI({allocator}, {{{params}}}, false)"
+            ).into(),
             JsToCConversionContext::WriteToBuffer(offset_var, offset) => format!(
                 "{js_call}._writeToArrayBuffer(arrayBuffer, {offset_var} + {offset}, {allocator}, {{{params}}})"
             )
@@ -809,7 +803,7 @@ impl<'tcx> TyGenContext<'_, 'tcx> {
         width: PrimitiveType,
     ) -> Cow<'tcx, str> {
         match context {
-            JsToCConversionContext::List(..) => js_to_c,
+            JsToCConversionContext::List => js_to_c,
             JsToCConversionContext::SlicePrealloc => {
                 unreachable!("Don't call maybe_wrap_in_write with multi-value slice expressions!")
             }

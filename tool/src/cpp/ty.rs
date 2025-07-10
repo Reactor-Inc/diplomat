@@ -13,6 +13,7 @@ use diplomat_core::hir::{
 use std::borrow::Cow;
 
 use crate::c::CAPI_NAMESPACE;
+use crate::filters;
 
 /// An expression with a corresponding variable name, such as a struct field or a function parameter.
 struct NamedExpression<'a> {
@@ -24,6 +25,17 @@ struct NamedExpression<'a> {
 struct NamedType<'a> {
     var_name: Cow<'a, str>,
     type_name: Cow<'a, str>,
+}
+
+/// We generate a pair of methods for writeables, one which returns a std::string
+/// and one which operates on a WriteTrait
+struct MethodWriteableInfo<'a> {
+    /// The method name. Usually `{}_write()`, but could potentially
+    /// be made customizeable
+    method_name: Cow<'a, str>,
+    /// The return type for the method without the std::string
+    return_ty: Cow<'a, str>,
+    c_to_cpp_return_expression: Option<Cow<'a, str>>,
 }
 
 /// Everything needed for rendering a method.
@@ -50,6 +62,9 @@ struct MethodInfo<'a> {
     /// the C function return value is saved to a variable named `result` or that the
     /// DiplomatWrite, if present, is saved to a variable named `output`.
     c_to_cpp_return_expression: Option<Cow<'a, str>>,
+
+    /// If the method returns a writeable, the info for that
+    writeable_info: Option<MethodWriteableInfo<'a>>,
     docs: String,
 }
 
@@ -84,6 +99,33 @@ impl<'ccx, 'tcx: 'ccx> TyGenContext<'ccx, 'tcx, '_> {
             .flat_map(|method| self.gen_method_info(id, method))
             .collect::<Vec<_>>();
 
+        let mut found_default: Option<&hir::EnumVariant> = None;
+        let mut found_zero = None;
+
+        // Not all enums have a zero-variant; zero-initializing those is a mistake and will
+        // lead to aborts in the conversion code. To allow default-initialization, we generate *some*
+        // default ctor. It is, in order: the explicit default variant, OR the variant with 0 discriminant,
+        // OR the first variant.
+        for v in ty.variants.iter() {
+            if v.attrs.default {
+                if let Some(existing) = found_default {
+                    self.errors.push_error(format!(
+                        "Found multiple default variants for enum: {} and {}",
+                        existing.name, v.name
+                    ))
+                }
+                found_default = Some(v)
+            }
+            if v.discriminant == 0 {
+                found_zero = Some(v)
+            }
+        }
+
+        let default_variant = found_default
+            .or(found_zero)
+            .unwrap_or(ty.variants.first().unwrap());
+
+        let default_variant = self.formatter.fmt_enum_variant(default_variant);
         #[derive(Template)]
         #[template(path = "cpp/enum_decl.h.jinja", escape = "none")]
         struct DeclTemplate<'a> {
@@ -96,6 +138,7 @@ impl<'ccx, 'tcx: 'ccx> TyGenContext<'ccx, 'tcx, '_> {
             type_name_unnamespaced: &'a str,
             c_header: C2Header,
             docs: &'a str,
+            default_variant: Cow<'a, str>,
         }
 
         DeclTemplate {
@@ -108,6 +151,7 @@ impl<'ccx, 'tcx: 'ccx> TyGenContext<'ccx, 'tcx, '_> {
             type_name_unnamespaced: &type_name_unnamespaced,
             c_header,
             docs: &self.formatter.fmt_docs(&ty.docs),
+            default_variant,
         }
         .render_into(self.decl_header)
         .unwrap();
@@ -346,24 +390,29 @@ impl<'ccx, 'tcx: 'ccx> TyGenContext<'ccx, 'tcx, '_> {
             cpp_to_c_params.push(conversion);
         }
 
-        if method.output.is_write() {
-            cpp_to_c_params.push("&write".into());
+        /// The UTF8 errors are added in by the C++ backend when converting from C++
+        /// types. We wrap them in another layer of diplomat::result.
+        fn wrap_return_ty_and_expr_for_utf8(
+            return_ty: &mut Cow<str>,
+            c_to_cpp_return_expression: &mut Option<Cow<str>>,
+        ) {
+            if let Some(return_expr) = c_to_cpp_return_expression {
+                *c_to_cpp_return_expression =
+                    Some(format!("diplomat::Ok<{return_ty}>({return_expr})").into());
+                *return_ty = format!("diplomat::result<{return_ty}, diplomat::Utf8Error>").into();
+            } else {
+                *c_to_cpp_return_expression = Some("diplomat::Ok<std::monostate>()".into());
+                *return_ty = "diplomat::result<std::monostate, diplomat::Utf8Error>".into();
+            }
         }
 
-        let mut return_ty = self.gen_cpp_return_type_name(&method.output);
+        let mut return_ty = self.gen_cpp_return_type_name(&method.output, false);
 
         let mut c_to_cpp_return_expression =
-            self.gen_c_to_cpp_for_return_type(&method.output, "result".into());
+            self.gen_c_to_cpp_for_return_type(&method.output, "result".into(), false);
 
         if returns_utf8_err {
-            if let Some(return_expr) = c_to_cpp_return_expression {
-                c_to_cpp_return_expression =
-                    Some(format!("diplomat::Ok<{return_ty}>({return_expr})").into());
-                return_ty = format!("diplomat::result<{return_ty}, diplomat::Utf8Error>").into();
-            } else {
-                c_to_cpp_return_expression = Some("diplomat::Ok<std::monostate>()".into());
-                return_ty = "diplomat::result<std::monostate, diplomat::Utf8Error>".into();
-            }
+            wrap_return_ty_and_expr_for_utf8(&mut return_ty, &mut c_to_cpp_return_expression)
         };
 
         // If the return expression is a std::move, unwrap that, because the linter doesn't like it
@@ -374,6 +423,26 @@ impl<'ccx, 'tcx: 'ccx> TyGenContext<'ccx, 'tcx, '_> {
                 expr
             }
         });
+
+        // Writeable methods generate a `std::string foo()` and a
+        // `template<typename W> void foo_write(W& writeable)` where `W` is a `WriteTrait`
+        // implementor. The generic method needs its own return type and conversion code.
+        let mut writeable_info = None;
+        if method.output.is_write() {
+            cpp_to_c_params.push("&write".into());
+            let mut return_ty = self.gen_cpp_return_type_name(&method.output, true);
+
+            let mut c_to_cpp_return_expression =
+                self.gen_c_to_cpp_for_return_type(&method.output, "result".into(), true);
+            if returns_utf8_err {
+                wrap_return_ty_and_expr_for_utf8(&mut return_ty, &mut c_to_cpp_return_expression)
+            };
+            writeable_info = Some(MethodWriteableInfo {
+                method_name: format!("{method_name}_write").into(),
+                return_ty,
+                c_to_cpp_return_expression,
+            });
+        }
 
         let pre_qualifiers = if method.param_self.is_none() {
             vec!["static".into()]
@@ -402,6 +471,7 @@ impl<'ccx, 'tcx: 'ccx> TyGenContext<'ccx, 'tcx, '_> {
             param_validations,
             cpp_to_c_params,
             c_to_cpp_return_expression,
+            writeable_info,
             docs: self.formatter.fmt_docs(&method.docs),
         })
     }
@@ -454,28 +524,7 @@ impl<'ccx, 'tcx: 'ccx> TyGenContext<'ccx, 'tcx, '_> {
                     .insert(self.formatter.fmt_impl_header_path(op_id));
                 ret
             }
-            Type::Struct(ref st) => {
-                let id = st.id();
-                let type_name = self.formatter.fmt_type_name(id);
-                let type_name_unnamespaced = self.formatter.fmt_type_name_unnamespaced(id);
-                let def = self.c.tcx.resolve_type(id);
-                if def.attrs().disable {
-                    self.errors
-                        .push_error(format!("Found usage of disabled type {type_name}"))
-                }
-
-                self.decl_header
-                    .append_forward(def, &type_name_unnamespaced);
-                if self.generating_struct_fields {
-                    self.decl_header
-                        .includes
-                        .insert(self.formatter.fmt_decl_header_path(id));
-                }
-                self.impl_header
-                    .includes
-                    .insert(self.formatter.fmt_impl_header_path(id));
-                type_name
-            }
+            Type::Struct(ref st) => self.gen_struct_name::<P>(st),
             Type::Enum(ref e) => {
                 let id = e.tcx_id.into();
                 let type_name = self.formatter.fmt_type_name(id);
@@ -512,12 +561,43 @@ impl<'ccx, 'tcx: 'ccx> TyGenContext<'ccx, 'tcx, '_> {
                 self.formatter.fmt_borrowed_str(encoding)
             )
             .into(),
+            Type::Slice(hir::Slice::Struct(b, ref st_ty)) => {
+                let st_name = self.gen_struct_name::<P>(st_ty);
+                let ret = self.formatter.fmt_borrowed_slice(
+                    &st_name,
+                    b.map(|b| b.mutability).unwrap_or(hir::Mutability::Mutable),
+                );
+                ret.into_owned().into()
+            }
             Type::Callback(ref cb) => format!("std::function<{}>", self.gen_fn_sig(cb)).into(),
             Type::DiplomatOption(ref inner) => {
                 format!("std::optional<{}>", self.gen_type_name(inner)).into()
             }
             _ => unreachable!("unknown AST/HIR variant"),
         }
+    }
+
+    fn gen_struct_name<P: TyPosition>(&mut self, st: &P::StructPath) -> Cow<'ccx, str> {
+        let id = st.id();
+        let type_name = self.formatter.fmt_type_name(id);
+        let type_name_unnamespaced = self.formatter.fmt_type_name_unnamespaced(id);
+        let def = self.c.tcx.resolve_type(id);
+        if def.attrs().disable {
+            self.errors
+                .push_error(format!("Found usage of disabled type {type_name}"))
+        }
+
+        self.decl_header
+            .append_forward(def, &type_name_unnamespaced);
+        if self.generating_struct_fields {
+            self.decl_header
+                .includes
+                .insert(self.formatter.fmt_decl_header_path(id));
+        }
+        self.impl_header
+            .includes
+            .insert(self.formatter.fmt_impl_header_path(id));
+        type_name
     }
 
     fn gen_fn_sig(&mut self, cb: &dyn CallbackInstantiationFunctionality) -> String {
@@ -590,6 +670,10 @@ impl<'ccx, 'tcx: 'ccx> TyGenContext<'ccx, 'tcx, '_> {
                 // Layout of DiplomatStringView and std::string_view are guaranteed to be identical, otherwise this would be terrible
                 "{{reinterpret_cast<const diplomat::capi::DiplomatStringView*>({cpp_name}.data()), {cpp_name}.size()}}"
             ).into(),
+            Type::Slice(Slice::Struct(b, ref st)) => format!("{{reinterpret_cast<{}{}*>({cpp_name}.data()), {cpp_name}.size()}}",
+                if b.map(|b| b.mutability).unwrap_or(Mutability::Mutable).is_mutable() { "" } else { "const " },
+                self.formatter.namespace_c_slice_name(st.id(), &self.formatter.fmt_type_name_unnamespaced(st.id()))
+            ).into(),
             Type::Slice(..) => format!("{{{cpp_name}.data(), {cpp_name}.size()}}").into(),
             Type::DiplomatOption(ref inner) => {
                 let conversion =
@@ -605,13 +689,22 @@ impl<'ccx, 'tcx: 'ccx> TyGenContext<'ccx, 'tcx, '_> {
     }
 
     /// Generates the C++ type name of a return type.
-    fn gen_cpp_return_type_name(&mut self, result_ty: &ReturnType) -> Cow<'ccx, str> {
+    ///
+    /// is_generic_write is whether we are generating the method that returns a string or
+    /// operates on a Writeable
+    fn gen_cpp_return_type_name(
+        &mut self,
+        result_ty: &ReturnType,
+        is_generic_write: bool,
+    ) -> Cow<'ccx, str> {
         match *result_ty {
             ReturnType::Infallible(SuccessType::Unit) => "void".into(),
+            ReturnType::Infallible(SuccessType::Write) if is_generic_write => "void".into(),
             ReturnType::Infallible(SuccessType::Write) => self.formatter.fmt_owned_str(),
             ReturnType::Infallible(SuccessType::OutType(ref o)) => self.gen_type_name(o),
             ReturnType::Fallible(ref ok, ref err) => {
                 let ok_type_name = match ok {
+                    SuccessType::Write if is_generic_write => "std::monostate".into(),
                     SuccessType::Write => self.formatter.fmt_owned_str(),
                     SuccessType::Unit => "std::monostate".into(),
                     SuccessType::OutType(o) => self.gen_type_name(o),
@@ -625,6 +718,7 @@ impl<'ccx, 'tcx: 'ccx> TyGenContext<'ccx, 'tcx, '_> {
             }
             ReturnType::Nullable(ref ty) => {
                 let type_name = match ty {
+                    SuccessType::Write if is_generic_write => "std::monostate".into(),
                     SuccessType::Write => self.formatter.fmt_owned_str(),
                     SuccessType::Unit => "std::monostate".into(),
                     SuccessType::OutType(o) => self.gen_type_name(o),
@@ -723,6 +817,16 @@ impl<'ccx, 'tcx: 'ccx> TyGenContext<'ccx, 'tcx, '_> {
                 );
                 format!("{span}({var_name}.data, {var_name}.len)").into()
             }
+            Type::Slice(hir::Slice::Struct(b, ref st_ty)) => {
+                let mt = b.map(|b| b.mutability).unwrap_or(hir::Mutability::Mutable);
+                let st_name = self.formatter.fmt_type_name(st_ty.id());
+                let span = self.formatter.fmt_borrowed_slice(&st_name, mt);
+                format!(
+                    "{span}(reinterpret_cast<{}{st_name}*>({var_name}.data), {var_name}.len)",
+                    if mt.is_mutable() { "" } else { "const " }
+                )
+                .into()
+            }
             Type::DiplomatOption(ref inner) => {
                 let conversion = self.gen_c_to_cpp_for_type(inner, format!("{var_name}.ok").into());
                 format!("{var_name}.is_ok ? std::optional({conversion}) : std::nullopt").into()
@@ -738,15 +842,18 @@ impl<'ccx, 'tcx: 'ccx> TyGenContext<'ccx, 'tcx, '_> {
         &mut self,
         result_ty: &ReturnType,
         var_name: Cow<'a, str>,
+        is_generic_write: bool,
     ) -> Option<Cow<'a, str>> {
         match *result_ty {
             ReturnType::Infallible(SuccessType::Unit) => None,
+            ReturnType::Infallible(SuccessType::Write) if is_generic_write => None,
             ReturnType::Infallible(SuccessType::Write) => Some("std::move(output)".into()),
             ReturnType::Infallible(SuccessType::OutType(ref out_ty)) => {
                 Some(self.gen_c_to_cpp_for_type(out_ty, var_name))
             }
             ReturnType::Fallible(ref ok, ref err) => {
                 let ok_type_name = match ok {
+                    SuccessType::Write if is_generic_write => "std::monostate".into(),
                     SuccessType::Write => self.formatter.fmt_owned_str(),
                     SuccessType::Unit => "std::monostate".into(),
                     SuccessType::OutType(ref o) => self.gen_type_name(o),
@@ -757,6 +864,7 @@ impl<'ccx, 'tcx: 'ccx> TyGenContext<'ccx, 'tcx, '_> {
                     None => "std::monostate".into(),
                 };
                 let ok_conversion = match ok {
+                    SuccessType::Write if is_generic_write => "".into(),
                     // Note: the `output` variable is a string initialized in the template
                     SuccessType::Write => "std::move(output)".into(),
                     SuccessType::Unit => "".into(),
@@ -775,6 +883,7 @@ impl<'ccx, 'tcx: 'ccx> TyGenContext<'ccx, 'tcx, '_> {
             }
             ReturnType::Nullable(ref ty) => {
                 let type_name = match ty {
+                    SuccessType::Write if is_generic_write => "std::monostate".into(),
                     SuccessType::Write => self.formatter.fmt_owned_str(),
                     SuccessType::Unit => "std::monostate".into(),
                     SuccessType::OutType(o) => self.gen_type_name(o),
@@ -782,6 +891,7 @@ impl<'ccx, 'tcx: 'ccx> TyGenContext<'ccx, 'tcx, '_> {
                 };
 
                 let conversion = match ty {
+                    SuccessType::Write if is_generic_write => "".into(),
                     // Note: the `output` variable is a string initialized in the template
                     SuccessType::Write => "std::move(output)".into(),
                     SuccessType::Unit => "".into(),

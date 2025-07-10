@@ -5,7 +5,6 @@ import com.sun.jna.Native
 import com.sun.jna.Pointer
 import com.sun.jna.Structure
 
-
 internal interface Float64VecLib: Library {
     fun Float64Vec_destroy(handle: Pointer)
     fun Float64Vec_new_bool(v: Slice): Pointer
@@ -39,6 +38,7 @@ class Float64Vec internal constructor (
     companion object {
         internal val libClass: Class<Float64VecLib> = Float64VecLib::class.java
         internal val lib: Float64VecLib = Native.load("somelib", libClass)
+        @JvmStatic
         
         fun newBool(v: BooleanArray): Float64Vec {
             val (vMem, vSlice) = PrimitiveArrayTools.native(v)
@@ -51,6 +51,7 @@ class Float64Vec internal constructor (
             if (vMem != null) vMem.close()
             return returnOpaque
         }
+        @JvmStatic
         
         fun newI16(v: ShortArray): Float64Vec {
             val (vMem, vSlice) = PrimitiveArrayTools.native(v)
@@ -63,6 +64,7 @@ class Float64Vec internal constructor (
             if (vMem != null) vMem.close()
             return returnOpaque
         }
+        @JvmStatic
         
         fun newU16(v: UShortArray): Float64Vec {
             val (vMem, vSlice) = PrimitiveArrayTools.native(v)
@@ -75,6 +77,7 @@ class Float64Vec internal constructor (
             if (vMem != null) vMem.close()
             return returnOpaque
         }
+        @JvmStatic
         
         fun newIsize(v: LongArray): Float64Vec {
             val (vMem, vSlice) = PrimitiveArrayTools.native(v)
@@ -87,6 +90,7 @@ class Float64Vec internal constructor (
             if (vMem != null) vMem.close()
             return returnOpaque
         }
+        @JvmStatic
         
         fun newUsize(v: ULongArray): Float64Vec {
             val (vMem, vSlice) = PrimitiveArrayTools.native(v)
@@ -99,6 +103,7 @@ class Float64Vec internal constructor (
             if (vMem != null) vMem.close()
             return returnOpaque
         }
+        @JvmStatic
         
         fun newF64BeBytes(v: ByteArray): Float64Vec {
             val (vMem, vSlice) = PrimitiveArrayTools.native(v)
@@ -111,6 +116,7 @@ class Float64Vec internal constructor (
             if (vMem != null) vMem.close()
             return returnOpaque
         }
+        @JvmStatic
         
         fun newFromOwned(v: DoubleArray): Float64Vec {
             val (vMem, vSlice) = PrimitiveArrayTools.native(v)
