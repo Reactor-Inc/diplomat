@@ -32,6 +32,8 @@ export { MyStructContainingAnOption, MyStructContainingAnOption_obj } from "./My
 
 export { MyZst } from "./MyZst"
 
+export { PrimitiveStruct, PrimitiveStruct_obj } from "./PrimitiveStruct"
+
 export { ScalarPairWithPadding, ScalarPairWithPadding_obj } from "./ScalarPairWithPadding"
 
 export { StructWithSlices, StructWithSlices_obj } from "./StructWithSlices"
@@ -55,6 +57,8 @@ export { RenamedOpaqueIterable } from "./RenamedOpaqueIterable"
 export { RenamedOpaqueIterator } from "./RenamedOpaqueIterator"
 
 export { Unnamespaced } from "./Unnamespaced"
+
+export { RenamedVectorTest } from "./RenamedVectorTest"
 
 export { Bar } from "./Bar"
 

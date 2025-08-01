@@ -30,6 +30,8 @@ export { MyStructContainingAnOption } from "./MyStructContainingAnOption.mjs"
 
 export { MyZst } from "./MyZst.mjs"
 
+export { PrimitiveStruct } from "./PrimitiveStruct.mjs"
+
 export { ScalarPairWithPadding } from "./ScalarPairWithPadding.mjs"
 
 export { StructWithSlices } from "./StructWithSlices.mjs"
@@ -53,6 +55,8 @@ export { RenamedOpaqueIterable } from "./RenamedOpaqueIterable.mjs"
 export { RenamedOpaqueIterator } from "./RenamedOpaqueIterator.mjs"
 
 export { Unnamespaced } from "./Unnamespaced.mjs"
+
+export { RenamedVectorTest } from "./RenamedVectorTest.mjs"
 
 export { Bar } from "./Bar.mjs"
 
