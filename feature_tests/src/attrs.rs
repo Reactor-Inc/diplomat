@@ -54,11 +54,13 @@ pub mod ffi {
     // Attr for generating mocking interface in kotlin backend to enable JVM test fakes.
     #[diplomat::attr(kotlin, generate_mocking_interface)]
     #[diplomat::attr(not(kotlin), rename = "AttrOpaque1Renamed")]
+    /// Some example docs
     pub struct AttrOpaque1;
 
     impl AttrOpaque1 {
         #[diplomat::attr(not(kotlin), rename = "totally_not_{0}")]
         #[diplomat::attr(auto, constructor)]
+        /// More example docs
         pub fn new() -> Box<AttrOpaque1> {
             Box::new(AttrOpaque1)
         }
@@ -188,6 +190,11 @@ pub mod ffi {
     struct OpaqueIterable(Vec<AttrOpaque1>);
 
     impl OpaqueIterable {
+        #[diplomat::attr(auto, constructor)]
+        pub fn new(size: usize) -> Box<Self> {
+            Box::new(Self(vec![AttrOpaque1; size]))
+        }
+
         #[diplomat::attr(auto, iterable)]
         pub fn iter<'a>(&'a self) -> Box<OpaqueIterator<'a>> {
             Box::new(OpaqueIterator(Box::new(self.0.iter().cloned())))
@@ -201,6 +208,32 @@ pub mod ffi {
         #[diplomat::attr(auto, iterator)]
         pub fn next(&'a mut self) -> Option<Box<AttrOpaque1>> {
             self.0.next().map(Box::new)
+        }
+    }
+
+    #[diplomat::opaque]
+    #[diplomat::attr(not(supports = iterators), disable)]
+    struct OpaqueRefIterable(Vec<AttrOpaque1>);
+
+    impl OpaqueRefIterable {
+        #[diplomat::attr(auto, constructor)]
+        pub fn new(size: usize) -> Box<Self> {
+            Box::new(Self(vec![AttrOpaque1; size]))
+        }
+
+        #[diplomat::attr(auto, iterable)]
+        pub fn iter<'a>(&'a self) -> Box<OpaqueRefIterator<'a>> {
+            Box::new(OpaqueRefIterator(self.0.iter()))
+        }
+    }
+
+    #[diplomat::opaque]
+    #[diplomat::attr(not(supports = iterators), disable)]
+    struct OpaqueRefIterator<'a>(std::slice::Iter<'a, AttrOpaque1>);
+    impl<'a> OpaqueRefIterator<'a> {
+        #[diplomat::attr(auto, iterator)]
+        pub fn next(&'a mut self) -> Option<&'a AttrOpaque1> {
+            self.0.next()
         }
     }
 
@@ -364,4 +397,15 @@ pub mod ffi {
     } [EXPR 0, IDENT TestMacroStruct] LT 'a literal "Testing" <=> diplomat::attr(auto, constructor) std::fmt::Write; {
         fn hello() {}
     } f64, pub, const IT:usize = 0;}
+
+    #[diplomat::attr(not(supports = free_functions), disable)]
+    pub fn free_func_test(x: i32) -> i32 {
+        x + 5
+    }
+
+    #[diplomat::attr(not(supports = free_functions), disable)]
+    #[diplomat::attr(auto, namespace = "nested::ns")]
+    pub fn nested_ns_fn(x: bool) -> bool {
+        !x
+    }
 }

@@ -35,27 +35,73 @@ internal class MyStructNative: Structure(), Structure.ByValue {
     }
 }
 
-class MyStruct internal constructor (
-    internal val nativeStruct: MyStructNative) {
-    val a: UByte = nativeStruct.a.toUByte()
-    val b: Boolean = nativeStruct.b > 0
-    val c: UByte = nativeStruct.c.toUByte()
-    val d: ULong = nativeStruct.d.toULong()
-    val e: Int = nativeStruct.e
-    val f: Int = nativeStruct.f
-    val g: MyEnum = MyEnum.fromNative(nativeStruct.g)
+
+
+
+internal class OptionMyStructNative constructor(): Structure(), Structure.ByValue {
+    @JvmField
+    internal var value: MyStructNative = MyStructNative()
+
+    @JvmField
+    internal var isOk: Byte = 0
+
+    // Define the fields of the struct
+    override fun getFieldOrder(): List<String> {
+        return listOf("value", "isOk")
+    }
+
+    internal fun option(): MyStructNative? {
+        if (isOk == 1.toByte()) {
+            return value
+        } else {
+            return null
+        }
+    }
+
+
+    constructor(value: MyStructNative, isOk: Byte): this() {
+        this.value = value
+        this.isOk = isOk
+    }
 
     companion object {
+        internal fun some(value: MyStructNative): OptionMyStructNative {
+            return OptionMyStructNative(value, 1)
+        }
+
+        internal fun none(): OptionMyStructNative {
+            return OptionMyStructNative(MyStructNative(), 0)
+        }
+    }
+
+}
+
+class MyStruct (var a: UByte, var b: Boolean, var c: UByte, var d: ULong, var e: Int, var f: Int, var g: MyEnum) {
+    companion object {
+
         internal val libClass: Class<MyStructLib> = MyStructLib::class.java
-        internal val lib: MyStructLib = Native.load("somelib", libClass)
+        internal val lib: MyStructLib = Native.load("diplomat_feature_tests", libClass)
         val NATIVESIZE: Long = Native.getNativeSize(MyStructNative::class.java).toLong()
+
+        internal fun fromNative(nativeStruct: MyStructNative): MyStruct {
+            val a: UByte = nativeStruct.a.toUByte()
+            val b: Boolean = nativeStruct.b > 0
+            val c: UByte = nativeStruct.c.toUByte()
+            val d: ULong = nativeStruct.d.toULong()
+            val e: Int = nativeStruct.e
+            val f: Int = nativeStruct.f
+            val g: MyEnum = MyEnum.fromNative(nativeStruct.g)
+
+            return MyStruct(a, b, c, d, e, f, g)
+        }
+
         @JvmStatic
         
         fun new_(): MyStruct {
             
             val returnVal = lib.MyStruct_new();
             
-            val returnStruct = MyStruct(returnVal)
+            val returnStruct = MyStruct.fromNative(returnVal)
             return returnStruct
         }
         @JvmStatic
@@ -81,11 +127,22 @@ class MyStruct internal constructor (
             }
         }
     }
+    internal fun toNative(): MyStructNative {
+        var native = MyStructNative()
+        native.a = FFIUint8(this.a)
+        native.b = if (this.b) 1 else 0
+        native.c = FFIUint8(this.c)
+        native.d = FFIUint64(this.d)
+        native.e = this.e
+        native.f = this.f
+        native.g = this.g.toNative()
+        return native
+    }
+
     
     fun intoA(): UByte {
         
-        val returnVal = lib.MyStruct_into_a(nativeStruct);
+        val returnVal = lib.MyStruct_into_a(this.toNative());
         return (returnVal.toUByte())
     }
-
 }

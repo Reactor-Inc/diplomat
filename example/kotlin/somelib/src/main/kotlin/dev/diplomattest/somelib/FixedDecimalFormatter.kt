@@ -29,7 +29,7 @@ class FixedDecimalFormatter internal constructor (
 
     companion object {
         internal val libClass: Class<FixedDecimalFormatterLib> = FixedDecimalFormatterLib::class.java
-        internal val lib: FixedDecimalFormatterLib = Native.load("somelib", libClass)
+        internal val lib: FixedDecimalFormatterLib = Native.load("diplomat_example", libClass)
         @JvmStatic
         
         /** Creates a new [FixedDecimalFormatter] from locale data.
@@ -38,7 +38,7 @@ class FixedDecimalFormatter internal constructor (
         */
         fun tryNew(locale: Locale, provider: DataProvider, options: FixedDecimalFormatterOptions): Result<FixedDecimalFormatter> {
             
-            val returnVal = lib.icu4x_FixedDecimalFormatter_try_new_mv1(locale.handle, provider.handle, options.nativeStruct);
+            val returnVal = lib.icu4x_FixedDecimalFormatter_try_new_mv1(locale.handle, provider.handle, options.toNative());
             if (returnVal.isOk == 1.toByte()) {
                 val selfEdges: List<Any> = listOf()
                 val handle = returnVal.union.ok 

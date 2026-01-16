@@ -1,4 +1,4 @@
-#[allow(clippy::needless_lifetimes)]
+#[allow(clippy::needless_lifetimes, deprecated)]
 #[diplomat::bridge]
 pub mod ffi {
     use diplomat_runtime::DiplomatStr16;
@@ -20,10 +20,12 @@ pub mod ffi {
     #[derive(Debug, PartialEq, Eq)]
     pub enum MyEnum {
         A = -2,
+        #[deprecated(note = "C is the new B")]
         B = -1,
         C = 0,
         #[diplomat::attr(auto, default)]
         D = 1,
+        /// EEEEEEE
         E = 2,
         F = 3,
     }
@@ -62,8 +64,6 @@ pub mod ffi {
 
     // Related to issue https://github.com/rust-diplomat/diplomat/issues/803
     // `diplomat-tool js` was crashing when trying to process options-in-structs
-    // Not supported in kotlin
-    #[diplomat::attr(kotlin, disable)]
     pub struct MyStructContainingAnOption {
         pub(crate) a: DiplomatOption<MyStruct>,
         pub(crate) b: DiplomatOption<DefaultEnum>,
@@ -196,6 +196,7 @@ pub mod ffi {
             Box::new(MyOpaqueEnum::A("a".into()))
         }
 
+        #[diplomat::attr(*, stringifier)]
         pub fn to_string(&self, write: &mut DiplomatWrite) {
             let _infallible = write!(
                 write,

@@ -22,24 +22,76 @@ internal class FixedDecimalFormatterOptionsNative: Structure(), Structure.ByValu
     }
 }
 
-class FixedDecimalFormatterOptions internal constructor (
-    internal val nativeStruct: FixedDecimalFormatterOptionsNative) {
-    val groupingStrategy: FixedDecimalGroupingStrategy = FixedDecimalGroupingStrategy.fromNative(nativeStruct.groupingStrategy)
-    val someOtherConfig: Boolean = nativeStruct.someOtherConfig > 0
+
+
+
+internal class OptionFixedDecimalFormatterOptionsNative constructor(): Structure(), Structure.ByValue {
+    @JvmField
+    internal var value: FixedDecimalFormatterOptionsNative = FixedDecimalFormatterOptionsNative()
+
+    @JvmField
+    internal var isOk: Byte = 0
+
+    // Define the fields of the struct
+    override fun getFieldOrder(): List<String> {
+        return listOf("value", "isOk")
+    }
+
+    internal fun option(): FixedDecimalFormatterOptionsNative? {
+        if (isOk == 1.toByte()) {
+            return value
+        } else {
+            return null
+        }
+    }
+
+
+    constructor(value: FixedDecimalFormatterOptionsNative, isOk: Byte): this() {
+        this.value = value
+        this.isOk = isOk
+    }
 
     companion object {
+        internal fun some(value: FixedDecimalFormatterOptionsNative): OptionFixedDecimalFormatterOptionsNative {
+            return OptionFixedDecimalFormatterOptionsNative(value, 1)
+        }
+
+        internal fun none(): OptionFixedDecimalFormatterOptionsNative {
+            return OptionFixedDecimalFormatterOptionsNative(FixedDecimalFormatterOptionsNative(), 0)
+        }
+    }
+
+}
+
+class FixedDecimalFormatterOptions (var groupingStrategy: FixedDecimalGroupingStrategy, var someOtherConfig: Boolean) {
+    companion object {
+
         internal val libClass: Class<FixedDecimalFormatterOptionsLib> = FixedDecimalFormatterOptionsLib::class.java
-        internal val lib: FixedDecimalFormatterOptionsLib = Native.load("somelib", libClass)
+        internal val lib: FixedDecimalFormatterOptionsLib = Native.load("diplomat_example", libClass)
         val NATIVESIZE: Long = Native.getNativeSize(FixedDecimalFormatterOptionsNative::class.java).toLong()
+
+        internal fun fromNative(nativeStruct: FixedDecimalFormatterOptionsNative): FixedDecimalFormatterOptions {
+            val groupingStrategy: FixedDecimalGroupingStrategy = FixedDecimalGroupingStrategy.fromNative(nativeStruct.groupingStrategy)
+            val someOtherConfig: Boolean = nativeStruct.someOtherConfig > 0
+
+            return FixedDecimalFormatterOptions(groupingStrategy, someOtherConfig)
+        }
+
         @JvmStatic
         
         fun default_(): FixedDecimalFormatterOptions {
             
             val returnVal = lib.icu4x_FixedDecimalFormatterOptions_default_mv1();
             
-            val returnStruct = FixedDecimalFormatterOptions(returnVal)
+            val returnStruct = FixedDecimalFormatterOptions.fromNative(returnVal)
             return returnStruct
         }
+    }
+    internal fun toNative(): FixedDecimalFormatterOptionsNative {
+        var native = FixedDecimalFormatterOptionsNative()
+        native.groupingStrategy = this.groupingStrategy.toNative()
+        native.someOtherConfig = if (this.someOtherConfig) 1 else 0
+        return native
     }
 
 }

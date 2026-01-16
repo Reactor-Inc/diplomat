@@ -28,20 +28,20 @@ class Locale internal constructor (
 
     companion object {
         internal val libClass: Class<LocaleLib> = LocaleLib::class.java
-        internal val lib: LocaleLib = Native.load("somelib", libClass)
+        internal val lib: LocaleLib = Native.load("diplomat_example", libClass)
         @JvmStatic
         
         /** Construct an [Locale] from a locale identifier represented as a string.
         */
         fun new_(name: String): Locale {
-            val (nameMem, nameSlice) = PrimitiveArrayTools.borrowUtf8(name)
+            val nameSliceMemory = PrimitiveArrayTools.borrowUtf8(name)
             
-            val returnVal = lib.icu4x_Locale_new_mv1(nameSlice);
+            val returnVal = lib.icu4x_Locale_new_mv1(nameSliceMemory.slice);
             val selfEdges: List<Any> = listOf()
             val handle = returnVal 
             val returnOpaque = Locale(handle, selfEdges)
             CLEANER.register(returnOpaque, Locale.LocaleCleaner(handle, Locale.lib));
-            if (nameMem != null) nameMem.close()
+            nameSliceMemory?.close()
             return returnOpaque
         }
     }

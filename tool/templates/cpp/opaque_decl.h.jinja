@@ -8,7 +8,9 @@
 {% include "c_include.h.jinja" %}
 
 {% if let Some(ns) = namespace -%}
-namespace {{ns}} {
+namespace {{fmt.lib_name_ns_prefix}}{{ns}} {
+{% else if let Some(lib_name) = &fmt.lib_name -%}
+namespace {{lib_name}} {
 {% endif -%}
 {% if !docs.is_empty() -%}
 /**
@@ -18,7 +20,7 @@ namespace {{ns}} {
 class {% if let Some(deprecated) = deprecated %}[[deprecated("{{ deprecated }}")]] {% endif -%} {{type_name_unnamespaced}} {
 public:
 {% for m in methods -%}
-{% include "method_decl.h.jinja" %}
+    {% include "function_defs/method_decl.h.jinja" %}
 {% endfor %}
     inline {{const_cptr}} AsFFI() const;
     inline {{mut_cptr}} AsFFI();
@@ -34,6 +36,6 @@ private:
     static void operator delete[](void*, size_t) = delete;
 };
 
-{% if namespace.is_some() -%}
+{% if namespace.is_some() || fmt.lib_name.is_some() -%}
 } // namespace
 {%-endif%}

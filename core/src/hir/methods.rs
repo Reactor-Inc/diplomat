@@ -9,6 +9,7 @@ use super::{
 };
 
 use super::lifetimes::{Lifetime, LifetimeEnv, Lifetimes, MaybeStatic};
+use super::ty_position::Sealed;
 
 use borrowing_field::BorrowingFieldVisitor;
 use borrowing_param::BorrowingParamVisitor;
@@ -17,6 +18,8 @@ pub mod borrowing_field;
 pub mod borrowing_param;
 
 /// A method exposed to Diplomat.
+/// Used for representing both free functions ([`crate::ast::Function`]) and struct methods ([`crate::ast::Method`]).
+/// The only difference between a free function and a struct method in this struct is that [`Self::param_self`] will always be `None` for a free function.
 #[derive(Debug)]
 #[non_exhaustive]
 pub struct Method {
@@ -39,7 +42,7 @@ pub struct Method {
     pub attrs: Attrs,
 }
 
-pub trait CallbackInstantiationFunctionality {
+pub trait CallbackInstantiationFunctionality: Sealed {
     #[allow(clippy::result_unit_err)]
     fn get_inputs(&self) -> Result<&[CallbackParam], ()>; // the types of the parameters
     #[allow(clippy::result_unit_err)]
@@ -62,6 +65,9 @@ pub struct Callback {
 #[derive(Debug, Clone)]
 #[non_exhaustive]
 pub enum NoCallback {}
+
+impl Sealed for Callback {}
+impl Sealed for NoCallback {}
 
 impl CallbackInstantiationFunctionality for Callback {
     fn get_inputs(&self) -> Result<&[CallbackParam], ()> {

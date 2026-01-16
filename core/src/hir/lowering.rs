@@ -5,8 +5,8 @@ use super::{
     OutStructDef, OutStructField, OutStructPath, OutType, Param, ParamLifetimeLowerer, ParamSelf,
     PrimitiveType, ReturnLifetimeLowerer, ReturnType, ReturnableStructPath,
     SelfParamLifetimeLowerer, SelfType, Slice, SpecialMethod, SpecialMethodPresence, StructDef,
-    StructField, StructPath, SuccessType, SymbolId, TraitDef, TraitParamSelf, TraitPath,
-    TyPosition, Type, TypeDef, TypeId,
+    StructField, StructPath, SuccessType, TraitDef, TraitParamSelf, TraitPath, TyPosition, Type,
+    TypeDef, TypeId,
 };
 use crate::ast::attrs::AttrInheritContext;
 use crate::{ast, Env};
@@ -125,7 +125,6 @@ pub(crate) struct ItemAndInfo<'ast, Ast> {
 
     /// Any parent attributes resolved from the module, for a method context
     pub(crate) method_parent_attrs: Attrs,
-    pub(crate) id: SymbolId,
 }
 
 impl<'ast> LoweringContext<'ast> {
@@ -199,6 +198,13 @@ impl<'ast> LoweringContext<'ast> {
         self.lower_all(ast_defs, Self::lower_trait)
     }
 
+    pub(super) fn lower_all_functions(
+        &mut self,
+        ast_defs: impl ExactSizeIterator<Item = ItemAndInfo<'ast, ast::Function>>,
+    ) -> Result<Vec<Method>, ()> {
+        self.lower_all(ast_defs, Self::lower_function)
+    }
+
     fn lower_enum(&mut self, item: ItemAndInfo<'ast, ast::Enum>) -> Result<EnumDef, ()> {
         let ast_enum = item.item;
         self.errors.set_item(ast_enum.name.as_str());
@@ -243,7 +249,6 @@ impl<'ast> LoweringContext<'ast> {
                 &ast_enum.methods[..],
                 item.in_path,
                 &item.method_parent_attrs,
-                item.id.try_into()?,
                 &mut special_method_presence,
             )?
         };
@@ -285,7 +290,6 @@ impl<'ast> LoweringContext<'ast> {
                 &ast_opaque.methods[..],
                 item.in_path,
                 &item.method_parent_attrs,
-                item.id.try_into()?,
                 &mut special_method_presence,
             )?
         };
@@ -378,7 +382,6 @@ impl<'ast> LoweringContext<'ast> {
                 &ast_struct.methods[..],
                 item.in_path,
                 &item.method_parent_attrs,
-                item.id.try_into()?,
                 &mut special_method_presence,
             )?
         };
@@ -492,6 +495,71 @@ impl<'ast> LoweringContext<'ast> {
         })
     }
 
+    fn lower_function(
+        &mut self,
+        ast_function: ItemAndInfo<'ast, ast::Function>,
+    ) -> Result<Method, ()> {
+        self.errors.set_item(ast_function.item.name.as_str());
+        let name = ast_function.item.name.clone();
+        let param_ltl = SelfParamLifetimeLowerer::no_self_ref(SelfParamLifetimeLowerer::new(
+            &ast_function.item.lifetimes,
+            self,
+        )?);
+
+        let (ast_params, takes_write) = match ast_function.item.params.split_last() {
+            Some((last, remaining)) if last.is_write() => (remaining, true),
+            _ => (&ast_function.item.params[..], false),
+        };
+
+        let attrs = self.attr_validator.attr_from_ast(
+            &ast_function.item.attrs,
+            &ast_function.ty_parent_attrs,
+            &mut self.errors,
+        );
+
+        if !attrs.disable && !self.attr_validator.attrs_supported().free_functions {
+            self.errors.push(LoweringError::Other(
+                format!("Could not lower public function {}, backend does not support free functions. Try #[diplomat::attr(not(supports = free_functions), disable)].", ast_function.item.name.as_str())
+            ));
+            return Err(());
+        }
+
+        let (params, return_type, lifetime_env) = if !attrs.disable {
+            let (params, return_ltl) =
+                self.lower_many_params(ast_params, param_ltl, ast_function.in_path)?;
+
+            let (return_type, lifetime_env) = self.lower_return_type(
+                ast_function.item.output_type.as_ref(),
+                takes_write,
+                return_ltl,
+                ast_function.in_path,
+            )?;
+            (params, return_type, lifetime_env)
+        } else {
+            (
+                Vec::new(),
+                ReturnType::Infallible(SuccessType::Unit),
+                LifetimeEnv::new(smallvec::SmallVec::new(), 0),
+            )
+        };
+
+        let def = Method {
+            docs: ast_function.item.docs.clone(),
+            name: self.lower_ident(&name, "function name")?,
+            abi_name: self.lower_ident(&ast_function.item.abi_name, "function abi name")?,
+            lifetime_env,
+            param_self: None,
+            params,
+            output: return_type,
+            attrs: attrs.clone(),
+        };
+
+        self.attr_validator
+            .validate(&attrs, AttributeContext::Function(&def), &mut self.errors);
+
+        Ok(def)
+    }
+
     fn lower_out_struct(
         &mut self,
         item: ItemAndInfo<'ast, ast::Struct>,
@@ -545,7 +613,6 @@ impl<'ast> LoweringContext<'ast> {
                 &ast_out_struct.methods[..],
                 item.in_path,
                 &item.method_parent_attrs,
-                item.id.try_into()?,
                 &mut special_method_presence,
             )?
         };
@@ -577,7 +644,6 @@ impl<'ast> LoweringContext<'ast> {
         method: &'ast ast::Method,
         in_path: &ast::Path,
         attrs: Attrs,
-        self_id: TypeId,
         special_method_presence: &mut SpecialMethodPresence,
     ) -> Result<Method, ()> {
         let name = self.lower_ident(&method.name, "method name");
@@ -607,6 +673,7 @@ impl<'ast> LoweringContext<'ast> {
         )?;
 
         let abi_name = self.lower_ident(&method.abi_name, "method abi name")?;
+
         let hir_method = Method {
             docs: method.docs.clone(),
             name: name?,
@@ -618,9 +685,11 @@ impl<'ast> LoweringContext<'ast> {
             attrs,
         };
 
+        let self_type_id = self.lower_self_type(method, in_path);
+
         self.attr_validator.validate(
             &hir_method.attrs,
-            AttributeContext::Method(&hir_method, self_id, special_method_presence),
+            AttributeContext::Method(&hir_method, self_type_id, special_method_presence),
             &mut self.errors,
         );
 
@@ -638,6 +707,39 @@ impl<'ast> LoweringContext<'ast> {
         Ok(hir_method)
     }
 
+    fn lower_self_type(
+        &mut self,
+        method: &'ast ast::Method,
+        in_path: &ast::Path,
+    ) -> Option<TypeId> {
+        method
+            .self_type
+            .as_ref()
+            .map(|self_type| match self_type.resolve(in_path, self.env) {
+                ast::CustomType::Enum(e) => self
+                    .lookup_id
+                    .resolve_enum(e)
+                    .expect("enum is in env")
+                    .into(),
+                ast::CustomType::Opaque(o) => self
+                    .lookup_id
+                    .resolve_opaque(o)
+                    .expect("opaque is in env")
+                    .into(),
+                ast::CustomType::Struct(s) => {
+                    if let Some(s_id) = self.lookup_id.resolve_struct(s) {
+                        s_id.into()
+                    } else if let Some(os_id) = self.lookup_id.resolve_out_struct(s) {
+                        os_id.into()
+                    } else {
+                        unreachable!(
+                            "struct `{}` not found in the set of structs or out_structs.",
+                            s.name
+                        )
+                    }
+                }
+            })
+    }
     /// Lowers many [`ast::Method`]s into a vector of [`hir::Method`]s.
     ///
     /// If there are any errors, they're pushed to `errors` and `None` is returned.
@@ -646,7 +748,6 @@ impl<'ast> LoweringContext<'ast> {
         ast_methods: &'ast [ast::Method],
         in_path: &ast::Path,
         method_parent_attrs: &Attrs,
-        self_id: TypeId,
         special_method_presence: &mut SpecialMethodPresence,
     ) -> Result<Vec<Method>, ()> {
         let mut methods = Ok(Vec::with_capacity(ast_methods.len()));
@@ -662,8 +763,7 @@ impl<'ast> LoweringContext<'ast> {
             if attrs.disable {
                 continue;
             }
-            let method =
-                self.lower_method(method, in_path, attrs, self_id, special_method_presence);
+            let method = self.lower_method(method, in_path, attrs, special_method_presence);
             match (method, &mut methods) {
                 (Ok(method), Ok(methods)) => {
                     if matches!(

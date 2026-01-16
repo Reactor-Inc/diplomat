@@ -25,6 +25,47 @@ internal class CallbackWrapperNative: Structure(), Structure.ByValue {
 }
 
 
+
+
+internal class OptionCallbackWrapperNative constructor(): Structure(), Structure.ByValue {
+    @JvmField
+    internal var value: CallbackWrapperNative = CallbackWrapperNative()
+
+    @JvmField
+    internal var isOk: Byte = 0
+
+    // Define the fields of the struct
+    override fun getFieldOrder(): List<String> {
+        return listOf("value", "isOk")
+    }
+
+    internal fun option(): CallbackWrapperNative? {
+        if (isOk == 1.toByte()) {
+            return value
+        } else {
+            return null
+        }
+    }
+
+
+    constructor(value: CallbackWrapperNative, isOk: Byte): this() {
+        this.value = value
+        this.isOk = isOk
+    }
+
+    companion object {
+        internal fun some(value: CallbackWrapperNative): OptionCallbackWrapperNative {
+            return OptionCallbackWrapperNative(value, 1)
+        }
+
+        internal fun none(): OptionCallbackWrapperNative {
+            return OptionCallbackWrapperNative(CallbackWrapperNative(), 0)
+        }
+    }
+
+}
+
+
 internal interface Runner_DiplomatCallback_CallbackWrapper_test_multi_arg_callback_diplomatCallback_f: Callback {
     fun invoke(lang_specific_context: Pointer?, arg0: Int ): Int
 }
@@ -162,7 +203,7 @@ internal class DiplomatCallback_CallbackWrapper_test_cb_with_struct_diplomatCall
         fun fromCallback(cb: (CallbackTestingStruct)->Int): DiplomatCallback_CallbackWrapper_test_cb_with_struct_diplomatCallback_f {
             val callback: Runner_DiplomatCallback_CallbackWrapper_test_cb_with_struct_diplomatCallback_f = object :  Runner_DiplomatCallback_CallbackWrapper_test_cb_with_struct_diplomatCallback_f {
                 override fun invoke(lang_specific_context: Pointer?, arg0: CallbackTestingStructNative ): Int {
-                    return cb(CallbackTestingStruct(arg0));
+                    return cb(CallbackTestingStruct.fromNative(arg0));
                 }
             }
             val cb_wrap = DiplomatCallback_CallbackWrapper_test_cb_with_struct_diplomatCallback_f_Native()
@@ -319,14 +360,19 @@ internal class DiplomatCallback_CallbackWrapper_test_slice_cb_arg_diplomatCallba
         }
     }
 }
-class CallbackWrapper internal constructor (
-    internal val nativeStruct: CallbackWrapperNative) {
-    val cantBeEmpty: Boolean = nativeStruct.cantBeEmpty > 0
-
+class CallbackWrapper (var cantBeEmpty: Boolean) {
     companion object {
+
         internal val libClass: Class<CallbackWrapperLib> = CallbackWrapperLib::class.java
-        internal val lib: CallbackWrapperLib = Native.load("somelib", libClass)
+        internal val lib: CallbackWrapperLib = Native.load("diplomat_feature_tests", libClass)
         val NATIVESIZE: Long = Native.getNativeSize(CallbackWrapperNative::class.java).toLong()
+
+        internal fun fromNative(nativeStruct: CallbackWrapperNative): CallbackWrapper {
+            val cantBeEmpty: Boolean = nativeStruct.cantBeEmpty > 0
+
+            return CallbackWrapper(cantBeEmpty)
+        }
+
         @JvmStatic
         
         fun testMultiArgCallback(f: (Int)->Int, x: Int): Int {
@@ -358,11 +404,16 @@ class CallbackWrapper internal constructor (
         @JvmStatic
         
         fun testSliceCbArg(arg: UByteArray, f: (UByteArray)->Unit): Unit {
-            val (argMem, argSlice) = PrimitiveArrayTools.borrow(arg)
+            val argSliceMemory = PrimitiveArrayTools.borrow(arg)
             
-            val returnVal = lib.CallbackWrapper_test_slice_cb_arg(argSlice, DiplomatCallback_CallbackWrapper_test_slice_cb_arg_diplomatCallback_f.fromCallback(f).nativeStruct);
+            val returnVal = lib.CallbackWrapper_test_slice_cb_arg(argSliceMemory.slice, DiplomatCallback_CallbackWrapper_test_slice_cb_arg_diplomatCallback_f.fromCallback(f).nativeStruct);
             
         }
+    }
+    internal fun toNative(): CallbackWrapperNative {
+        var native = CallbackWrapperNative()
+        native.cantBeEmpty = if (this.cantBeEmpty) 1 else 0
+        return native
     }
 
 }

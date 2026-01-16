@@ -1,4 +1,4 @@
-//! Built around the [`TyGenContext`] type. We use this for creating `.mjs` and `.d.ts` files from given [`hir::TypeDef`]s.
+//! Built around the [`ItemGenContext`] type. We use this for creating `.mjs` and `.d.ts` files from given [`hir::TypeDef`]s.
 //! See [`converter`] for more conversion specific functions.
 
 use std::alloc::Layout;
@@ -11,7 +11,7 @@ use diplomat_core::hir::borrowing_param::{
 };
 use diplomat_core::hir::{
     self, EnumDef, LifetimeEnv, Method, OpaqueDef, SpecialMethod, SpecialMethodPresence,
-    StructPathLike, Type, TypeContext, TypeId,
+    StructPathLike, Type, TypeContext,
 };
 
 use askama::{self, Template};
@@ -24,7 +24,7 @@ use crate::ErrorStore;
 use super::converter::{JsToCConversionContext, StructBorrowContext};
 
 /// Represents list of imports that our Type is going to use.
-/// Resolved in [`TyGenContext::generate_base`]
+/// Resolved in [`ItemGenContext::generate_base`]
 pub(super) struct Imports<'tcx> {
     pub js: BTreeSet<ImportInfo<'tcx>>,
     pub ts: BTreeSet<ImportInfo<'tcx>>,
@@ -33,18 +33,18 @@ pub(super) struct Imports<'tcx> {
 /// Represents context for generating a Javascript class.
 ///
 /// Given an enum, opaque, struct, etc. (anything from [`hir::TypeDef`] that JS supports), this handles creation of the associated `.mjs`` files.
-pub(super) struct TyGenContext<'ctx, 'tcx> {
+pub(super) struct ItemGenContext<'ctx, 'tcx> {
     pub tcx: &'tcx TypeContext,
     pub type_name: Cow<'tcx, str>,
     pub formatter: &'ctx JSFormatter<'tcx>,
     pub errors: &'ctx ErrorStore<'tcx, String>,
-    /// Imports, stored as a type name. Imports are fully resolved in [`TyGenContext::generate_base`], with a call to [`JSFormatter::fmt_import_statement`].
+    /// Imports, stored as a type name. Imports are fully resolved in [`ItemGenContext::generate_base`], with a call to [`JSFormatter::fmt_import_statement`].
     pub imports: RefCell<Imports<'tcx>>,
     #[allow(dead_code)]
     pub config: JsConfig,
 }
 
-impl<'tcx> TyGenContext<'_, 'tcx> {
+impl<'tcx> ItemGenContext<'_, 'tcx> {
     /// Generates the code at the top of every `.d.ts` and `.mjs` file.
     ///
     /// This could easily be an [inherited template](https://djc.github.io/askama/template_syntax.html#template-inheritance), if you want to be a little more strict about how templates are used.
@@ -421,24 +421,17 @@ impl<'tcx> TyGenContext<'_, 'tcx> {
         .unwrap()
     }
 
-    /// Generate required method info for all other [`TyGenContext::generate_*`] calls.
+    /// Generate required method info for all other [`ItemGenContext::generate_*`] calls.
     ///
     /// For re-usability between `.d.ts` and `.mjs` files.
-    pub(super) fn generate_method(
-        &self,
-        type_id: TypeId,
-        method: &'tcx Method,
-    ) -> Option<MethodInfo<'_>> {
+    pub(super) fn generate_method(&self, method: &'tcx Method) -> Option<MethodInfo<'_>> {
         if method.attrs.disable {
             return None;
         }
 
         let mut visitor = method.borrowing_param_visitor(self.tcx, true);
 
-        let _guard = self.errors.set_context_method(
-            self.tcx.fmt_type_name_diagnostics(type_id),
-            method.name.as_str().into(),
-        );
+        let _guard = self.errors.set_context_method(method.name.as_str().into());
 
         let abi_name = String::from(method.abi_name.as_str());
 
@@ -452,6 +445,11 @@ impl<'tcx> TyGenContext<'_, 'tcx> {
 
         if let Some(param_self) = method.param_self.as_ref() {
             let self_borrow_kind = visitor.visit_param(&param_self.ty.clone().into(), "this");
+
+            let layout =
+                crate::js::layout::type_size_alignment(&param_self.ty.clone().into(), self.tcx);
+            // We add because all parameters will have to be allocated at once:
+            method_info.max_alloc += layout.size();
 
             let struct_borrow = if let ParamBorrowInfo::Struct(param_info) = self_borrow_kind {
                 Some(super::converter::StructBorrowContext {
@@ -485,6 +483,10 @@ impl<'tcx> TyGenContext<'_, 'tcx> {
         }
 
         for param in method.params.iter() {
+            let layout = crate::js::layout::type_size_alignment(&param.ty, self.tcx);
+            // We add because all parameters will have to be allocated at once:
+            method_info.max_alloc += layout.size();
+
             let base_type = self.gen_js_type_str(&param.ty);
             let param_type_str = format!(
                 "{}",
@@ -516,29 +518,33 @@ impl<'tcx> TyGenContext<'_, 'tcx> {
 
             // If we're a slice of strings or primitives. See [`hir::Type::Slice`].
             if let hir::Type::Slice(..) = param.ty {
-                let slice_expr = self.gen_js_to_c_for_type(&param.ty, param_info.name.clone(), None, Some(
-                        match param_borrow_kind {
-                            // Is Rust NOT taking ownership?
-                            // Then that means we can free this after the function is done.
-                            ParamBorrowInfo::TemporarySlice => {
-                                method_info.needs_cleanup = true;
-                                "functionCleanupArena"
-                            },
+                let alloc = match param_borrow_kind {
+                    // Is Rust NOT taking ownership?
+                    // Then that means we can free this after the function is done.
+                    ParamBorrowInfo::TemporarySlice => {
+                        method_info.needs_cleanup = true;
+                        "functionCleanupArena"
+                    }
 
-                            // Is this function borrowing the slice?
-                            // I.e., Do we need it alive for at least as long as this function call?
-                            ParamBorrowInfo::BorrowedSlice => {
-                                method_info.needs_slice_collection = true;
-                                "functionGarbageCollectorGrip"
-                            },
-                            _ => unreachable!(
-                                "Slices must produce slice ParamBorrowInfo, found {param_borrow_kind:?}"
-                            ),
-                        }
+                    // Is this function borrowing the slice?
+                    // I.e., Do we need it alive for at least as long as this function call?
+                    ParamBorrowInfo::BorrowedSlice => {
+                        method_info.needs_slice_collection = true;
+                        "functionGarbageCollectorGrip"
+                    }
+                    _ => unreachable!(
+                        "Slices must produce slice ParamBorrowInfo, found {param_borrow_kind:?}"
                     ),
+                };
+
+                let slice_expr = self.gen_js_to_c_for_type(
+                    &param.ty,
+                    param_info.name.clone(),
+                    None,
+                    Some(alloc),
                     // We're specifically doing slice preallocation here
-                    JsToCConversionContext::SlicePrealloc
-                    );
+                    JsToCConversionContext::SlicePrealloc,
+                );
 
                 // We add the pointer and size for slices:
                 method_info
@@ -685,7 +691,7 @@ pub(super) struct MethodInfo<'info> {
     pub parameters: Vec<ParamInfo<'info>>,
     /// See [`SliceParam`] for info on how this array is used.
     pub slice_params: Vec<SliceParam<'info>>,
-    /// Represents the Javascript needed to take the parameters from the method definition into C-friendly terms. See [`TyGenContext::gen_js_to_c_for_type`] for more.
+    /// Represents the Javascript needed to take the parameters from the method definition into C-friendly terms. See [`ItemGenContext::gen_js_to_c_for_type`] for more.
     pub param_conversions: Vec<Cow<'info, str>>,
 
     /// The return type, for `.d.ts` files.
@@ -704,9 +710,12 @@ pub(super) struct MethodInfo<'info> {
     pub cleanup_expressions: Vec<Cow<'info, str>>,
 
     doc_str: String,
+
+    /// The most amount of bytes we will ever have to allocate when calling this function:
+    pub max_alloc: usize,
 }
 
-/// See [`TyGenContext::generate_special_method`].
+/// See [`ItemGenContext::generate_special_method`].
 /// Used in `js_class.js.jinja`
 pub(super) struct SpecialMethodInfo<'a> {
     iterator: Option<Cow<'a, str>>,
@@ -779,7 +788,7 @@ impl Eq for ImportInfo<'_> {}
 
 // Helpers used in templates (Askama has restrictions on Rust syntax)
 
-/// Used in `method.js.jinja`. Used to create JS friendly interpretations of lifetime edges, to be passed into newly created JS structures (see [`JSFormatter::fmt_lifetime_edge_array`] and see [`TyGenContext::gen_c_to_js_for_type`] for more.)
+/// Used in `method.js.jinja`. Used to create JS friendly interpretations of lifetime edges, to be passed into newly created JS structures (see [`JSFormatter::fmt_lifetime_edge_array`] and see [`ItemGenContext::gen_c_to_js_for_type`] for more.)
 ///
 /// Modified from dart backend.
 fn display_lifetime_edge<'a>(edge: &'a LifetimeEdge) -> Cow<'a, str> {

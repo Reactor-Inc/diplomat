@@ -4,8 +4,7 @@ use diplomat_core::hir::{
     self, BackendAttrSupport, Borrow, Callback, DocsUrlGenerator, InputOnly, Lifetime, LifetimeEnv,
     Lifetimes, MaybeOwn, MaybeStatic, Method, Mutability, OpaquePath, Optional, OutType, Param,
     PrimitiveType, ReturnableStructDef, ReturnableStructPath, SelfType, Slice, SpecialMethod,
-    StringEncoding, StructField, StructPath, StructPathLike, TraitIdGetter, TyPosition, Type,
-    TypeContext, TypeDef,
+    StringEncoding, StructPathLike, TraitIdGetter, TyPosition, Type, TypeContext, TypeDef,
 };
 use diplomat_core::hir::{ReturnType, SuccessType};
 
@@ -30,6 +29,7 @@ pub(crate) fn attr_support() -> BackendAttrSupport {
     a.utf8_strings = false;
     a.utf16_strings = true;
     a.static_slices = true;
+    a.option = true;
 
     a.constructors = false; // TODO
     a.named_constructors = false; // TODO
@@ -54,6 +54,9 @@ pub(crate) fn attr_support() -> BackendAttrSupport {
 #[derive(Debug, Clone, Deserialize, Serialize, Default)]
 pub struct KotlinConfig {
     domain: Option<String>,
+    /// An optional override for the dylib name
+    /// By default this will look for a dylib named lib{lib-name}.so
+    dylib_name: Option<String>,
     use_finalizers_not_cleaners: Option<bool>,
     scaffold: Option<bool>,
 }
@@ -72,6 +75,9 @@ impl KotlinConfig {
             "scaffold" => {
                 self.scaffold = value.as_str().map(|val| val == "true");
             }
+            "dylib_name" => {
+                self.dylib_name = value.as_str().map(|val| val.to_string());
+            }
             _ => {}
         }
     }
@@ -86,6 +92,7 @@ pub(crate) fn run<'tcx>(
         domain,
         use_finalizers_not_cleaners,
         scaffold,
+        dylib_name,
     } = conf.kotlin_config;
 
     let domain = domain.expect("Failed to parse Kotlin config. Missing required field `domain`.");
@@ -95,6 +102,8 @@ pub(crate) fn run<'tcx>(
         .lib_name
         .expect("Failed to parse Kotlin config. Missing required field `lib_name`.");
 
+    let dylib_name = dylib_name.as_deref().unwrap_or(&lib_name);
+
     let use_finalizers_not_cleaners = use_finalizers_not_cleaners.unwrap_or(false);
     let formatter = KotlinFormatter::new(tcx, None, docs_url_gen);
 
@@ -102,13 +111,16 @@ pub(crate) fn run<'tcx>(
     let errors = ErrorStore::default();
     let mut callback_params = Vec::new();
 
-    let mut ty_gen_cx = TyGenContext {
+    let mut ty_gen_cx = ItemGenContext {
         tcx,
         errors: &errors,
         result_types: RefCell::new(BTreeSet::new()),
-        option_types: RefCell::new(BTreeSet::new()),
         formatter: &formatter,
         callback_params: &mut callback_params,
+        lib_name: &lib_name,
+        dylib_name,
+        domain: &domain,
+        use_finalizers_not_cleaners,
     };
 
     for (_id, ty) in tcx.all_types() {
@@ -121,13 +133,7 @@ pub(crate) fn run<'tcx>(
             TypeDef::Opaque(o) => {
                 let type_name = o.name.to_string();
 
-                let (file_name, body) = ty_gen_cx.gen_opaque_def(
-                    o,
-                    &type_name,
-                    &domain,
-                    &lib_name,
-                    use_finalizers_not_cleaners,
-                );
+                let (file_name, body) = ty_gen_cx.gen_opaque_def(o, &type_name);
 
                 files.add_file(format!("src/main/kotlin/{file_name}"), body);
             }
@@ -135,13 +141,7 @@ pub(crate) fn run<'tcx>(
             TypeDef::OutStruct(o) => {
                 let type_name = o.name.to_string();
 
-                let (file_name, body) = ty_gen_cx.gen_struct_def(
-                    o,
-                    &type_name,
-                    &domain,
-                    &lib_name,
-                    use_finalizers_not_cleaners,
-                );
+                let (file_name, body) = ty_gen_cx.gen_struct_def(o, &type_name);
 
                 files.add_file(format!("src/main/kotlin/{file_name}"), body);
             }
@@ -149,13 +149,7 @@ pub(crate) fn run<'tcx>(
             TypeDef::Struct(struct_def) => {
                 let type_name = struct_def.name.to_string();
 
-                let (file_name, body) = ty_gen_cx.gen_struct_def(
-                    struct_def,
-                    &type_name,
-                    &domain,
-                    &lib_name,
-                    use_finalizers_not_cleaners,
-                );
+                let (file_name, body) = ty_gen_cx.gen_struct_def(struct_def, &type_name);
 
                 files.add_file(format!("src/main/kotlin/{file_name}"), body);
             }
@@ -163,13 +157,7 @@ pub(crate) fn run<'tcx>(
             TypeDef::Enum(enum_def) => {
                 let type_name = enum_def.name.to_string();
 
-                let (file_name, body) = ty_gen_cx.gen_enum_def(
-                    enum_def,
-                    &type_name,
-                    &domain,
-                    &lib_name,
-                    use_finalizers_not_cleaners,
-                );
+                let (file_name, body) = ty_gen_cx.gen_enum_def(enum_def, &type_name);
 
                 files.add_file(format!("src/main/kotlin/{file_name}"), body);
             }
@@ -187,7 +175,7 @@ pub(crate) fn run<'tcx>(
         }
         let trait_name = trt_def.name.to_string();
 
-        let (file_name, body) = ty_gen_cx.gen_trait_def(trt_def, &trait_name, &domain, &lib_name);
+        let (file_name, body) = ty_gen_cx.gen_trait_def(trt_def, &trait_name);
 
         files.add_file(format!("src/main/kotlin/{file_name}"), body);
     }
@@ -229,28 +217,39 @@ pub(crate) fn run<'tcx>(
         .map(|result_type| result_type.render().expect("failed to render result type"))
         .collect::<Vec<_>>();
 
-    let native_options = ty_gen_cx
-        .option_types
-        .borrow()
-        .iter()
-        .map(|option_type| option_type.render().expect("failed to render option type"))
-        .collect::<Vec<_>>();
+    // The map may contain entries that resolve to the same underlying native types
+    // In this case, we don't want to generate multiple copies of those types, as
+    // that will error. Make sure we're not doing that.
+
+    let mut native_results_found = BTreeSet::new();
+
+    for ty in &*ty_gen_cx.result_types.borrow() {
+        let combined = (&ty.ok.type_name, &ty.err.type_name);
+
+        let inserted = native_results_found.insert(combined);
+        if !inserted {
+            panic!(
+                "Found duplicate native Result type for Result<{}, {}> (defaults: ({:?}, {:?}))",
+                ty.ok.type_name, ty.err.type_name, ty.ok.default, ty.err.default
+            );
+        }
+    }
 
     #[derive(Template)]
     #[template(path = "kotlin/init.kt.jinja", escape = "none")]
     struct Init<'a> {
         domain: &'a str,
         native_results: &'a [String],
-        native_options: &'a [String],
         lib_name: &'a str,
+        dylib_name: &'a str,
         use_finalizers_not_cleaners: bool,
     }
 
     let init = Init {
         domain: &domain,
         lib_name: &lib_name,
+        dylib_name,
         native_results: native_results.as_slice(),
-        native_options: native_options.as_slice(),
         use_finalizers_not_cleaners,
     }
     .render()
@@ -267,30 +266,32 @@ pub(crate) fn run<'tcx>(
     (files, errors)
 }
 
-#[derive(Template, Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Hash)]
-#[template(path = "kotlin/Option.kt.jinja")]
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Hash)]
 struct TypeForResult<'d> {
     type_name: Cow<'d, str>,
     default: Option<Cow<'d, str>>,
 }
 
-#[derive(Template, PartialEq, Eq, PartialOrd, Ord, Clone, Hash)]
+#[derive(Template, PartialEq, Eq, PartialOrd, Ord, Clone, Hash, Debug)]
 #[template(path = "kotlin/Result.kt.jinja")]
 struct NativeResult<'d> {
     ok: TypeForResult<'d>,
     err: TypeForResult<'d>,
 }
 
-struct TyGenContext<'a, 'cx> {
+struct ItemGenContext<'a, 'cx> {
     tcx: &'cx TypeContext,
+    lib_name: &'a str,
+    dylib_name: &'a str,
+    domain: &'a str,
     formatter: &'a KotlinFormatter<'cx>,
     result_types: RefCell<BTreeSet<NativeResult<'cx>>>,
-    option_types: RefCell<BTreeSet<TypeForResult<'cx>>>,
     errors: &'a ErrorStore<'cx, String>,
     callback_params: &'a mut Vec<CallbackParamInfo>,
+    use_finalizers_not_cleaners: bool,
 }
 
-impl<'cx> TyGenContext<'_, 'cx> {
+impl<'cx> ItemGenContext<'_, 'cx> {
     fn gen_infallible_return_type_name(&self, success_type: &SuccessType) -> Cow<'cx, str> {
         match success_type {
             SuccessType::Unit => self.formatter.fmt_void().into(),
@@ -313,15 +314,18 @@ impl<'cx> TyGenContext<'_, 'cx> {
         }
     }
 
-    fn gen_kt_to_c_for_type<P: TyPosition<StructPath = StructPath, OpaqueOwnership = Borrow>>(
+    /// Booleans are represented differently at the native layer in struct fields and params
+    /// so we have is_param to track that.
+    fn gen_kt_to_c_for_type<P: TyPosition<OpaqueOwnership = Borrow>>(
         &self,
         ty: &Type<P>,
-        name: Cow<'cx, str>,
+        name: Cow<str>,
+        is_param: bool,
     ) -> Cow<'cx, str> {
         match *ty {
             Type::Primitive(prim) => self
                 .formatter
-                .fmt_primitive_to_native_conversion(name.as_ref(), prim)
+                .fmt_primitive_to_native_conversion(name.as_ref(), prim, is_param)
                 .into(),
             Type::Opaque(ref op @ OpaquePath { owner, .. }) => {
                 let optional = if op.is_optional() { "?" } else { "" };
@@ -330,7 +334,7 @@ impl<'cx> TyGenContext<'_, 'cx> {
                     Mutability::Mutable => format!("{name}{optional}.handle /* note this is a mutable reference. Think carefully about using, especially concurrently */" ).into(),
                 }
             }
-            Type::Struct(_) => format!("{name}.nativeStruct").into(),
+            Type::Struct(_) => format!("{name}.toNative()").into(),
             Type::ImplTrait(ref trt) => {
                 let trait_id = trt.id();
                 let resolved = self.tcx.resolve_trait(trait_id);
@@ -339,13 +343,28 @@ impl<'cx> TyGenContext<'_, 'cx> {
                     .into()
             }
             Type::Enum(_) => format!("{name}.toNative()").into(),
-            Type::Slice(Slice::Str(None, _)) | Type::Slice(Slice::Primitive(MaybeOwn::Own, _)) => {
-                format!("{name}Slice").into()
+            Type::Slice(ref s) => {
+                if is_param {
+                    format!("{name}SliceMemory.slice").into()
+                } else {
+                    // TODO(#1003) this is incorrect, since it won't handle the borrow (the Memory object is discarded)
+                    let slice_method = self.slice_method_for(s);
+                    format!("PrimitiveArrayTools.{slice_method}({name}).slice").into()
+                }
             }
-            Type::Slice(_) => format!("{name}Slice").into(),
             Type::Callback(_) => {
                 let real_param_name = name[name.rfind('_').unwrap() + 1..].to_string(); // past last _
                 format!("{name}.fromCallback({real_param_name}).nativeStruct").into()
+            }
+            Type::DiplomatOption(ref inner) => {
+                // We pass false for is_params here the type is a struct field
+                let inner_expr = self.gen_kt_to_c_for_type(inner, "it".into(), false);
+                let ffi_option = format!(
+                    "Option{}",
+                    self.formatter.fmt_struct_field_type_native(inner)
+                );
+                format!("{name}?.let {{ {ffi_option}.some({inner_expr}) }} ?: {ffi_option}.none()")
+                    .into()
             }
             _ => todo!(),
         }
@@ -382,7 +401,7 @@ impl<'cx> TyGenContext<'_, 'cx> {
                                 _ => unreachable!("unknown AST/HIR variant"),
                             }
                         })
-                        .map(|t| self.formatter.fmt_field_default(t)),
+                        .map(|t| self.formatter.fmt_field_default(t, true)),
                     _ => None,
                 };
                 let err_default = err
@@ -397,7 +416,7 @@ impl<'cx> TyGenContext<'_, 'cx> {
                             _ => unreachable!("unknown AST/HIR variant"),
                         }
                     })
-                    .map(|t| self.formatter.fmt_field_default(t));
+                    .map(|t| self.formatter.fmt_field_default(t, true));
                 let result_type = NativeResult {
                     ok: TypeForResult {
                         type_name: ok_type.clone(),
@@ -413,45 +432,17 @@ impl<'cx> TyGenContext<'_, 'cx> {
 
                 format!("Result{ok_type}{err_type}").into()
             }
-            ReturnType::Nullable(SuccessType::Unit | SuccessType::Write) => {
-                let mut option_types = self.option_types.borrow_mut();
-                option_types.insert(TypeForResult {
-                    type_name: "Unit".into(),
-                    default: None,
-                });
-                "OptionUnit".into()
-            }
+            ReturnType::Nullable(SuccessType::Unit | SuccessType::Write) => "OptionUnit".into(),
             ReturnType::Nullable(
                 ref success @ SuccessType::OutType(
                     Type::Struct(..) | Type::Enum(..) | Type::Primitive(..),
                 ),
             ) => {
-                let mut option_types = self.option_types.borrow_mut();
                 let infallible_return = self.gen_infallible_return_type_ffi(success);
-                let default = match success {
-                    SuccessType::OutType(Type::Struct(..) | Type::Enum(..)) => {
-                        format!("{infallible_return}()")
-                    }
-                    SuccessType::OutType(Type::Primitive(prim)) => {
-                        self.formatter.fmt_primitive_default(*prim).into()
-                    }
-                    _ => unreachable!("success type can only be one of the above"),
-                };
-                option_types.insert(TypeForResult {
-                    type_name: infallible_return.clone(),
-                    default: Some(default.into()),
-                });
                 format!("Option{infallible_return}").into()
             }
             ReturnType::Nullable(SuccessType::OutType(Type::Opaque(..))) => "Pointer?".into(),
-            ReturnType::Nullable(SuccessType::OutType(Type::Slice(..))) => {
-                let mut option_types = self.option_types.borrow_mut();
-                option_types.insert(TypeForResult {
-                    type_name: "Slice".into(),
-                    default: Some("Slice()".into()),
-                });
-                "OptionSlice".into()
-            }
+            ReturnType::Nullable(SuccessType::OutType(Type::Slice(..))) => "OptionSlice".into(),
             _ => panic!("unsupported return type"),
         }
     }
@@ -483,6 +474,11 @@ impl<'cx> TyGenContext<'_, 'cx> {
                 let resolved = self.tcx.resolve_trait(trait_id);
                 format!("DiplomatTrait_{}_Wrapper_Native", resolved.name).into()
             }
+
+            Type::DiplomatOption(ref inner) => {
+                assert!(additional_name.is_none());
+                format!("Option{}", self.gen_type_name_ffi(inner, None)).into()
+            }
             _ => unreachable!("unknown AST/HIR variant"),
         }
     }
@@ -496,7 +492,6 @@ impl<'cx> TyGenContext<'_, 'cx> {
         cleanups: &[Cow<'d, str>],
         val_name: &'d str,
         return_type_modifier: &str,
-        use_finalizers_not_cleaners: bool,
     ) -> String {
         let opaque_def = opaque_path.resolve(self.tcx);
 
@@ -569,7 +564,7 @@ impl<'cx> TyGenContext<'_, 'cx> {
             optional,
             val_name,
             return_type_modifier,
-            use_finalizers_not_cleaners,
+            use_finalizers_not_cleaners: self.use_finalizers_not_cleaners,
         };
         opaque_return
             .render()
@@ -716,7 +711,6 @@ return string{return_type_modifier}"#
         return_type_modifier: &'d str,
         err_cast: &'d str,
         o: &'d OutType,
-        use_finalizers_not_cleaners: bool,
     ) -> String {
         match o {
             Type::Primitive(prim) => {
@@ -732,7 +726,6 @@ return string{return_type_modifier}"#
                 cleanups,
                 val_name,
                 return_type_modifier,
-                use_finalizers_not_cleaners,
             ),
             Type::Struct(strct) => {
                 let lifetimes = strct.lifetimes();
@@ -754,6 +747,7 @@ return string{return_type_modifier}"#
                 )
             }
             Type::Slice(slc) => {
+                // Slices do NOT  need to worry about borrows when being returned since they're just copied
                 self.gen_slice_return_conversion(slc, val_name, return_type_modifier)
             }
             _ => todo!(),
@@ -767,7 +761,6 @@ return string{return_type_modifier}"#
         cleanups: &[Cow<'d, str>],
         val_name: &'d str,
         o: &'d OutType,
-        use_finalizers_not_cleaners: bool,
     ) -> String {
         match o {
             Type::Primitive(prim) => {
@@ -781,7 +774,6 @@ return string{return_type_modifier}"#
                 cleanups,
                 val_name,
                 ".?",
-                use_finalizers_not_cleaners,
             ),
             Type::Struct(strct) => {
                 let lifetimes = strct.lifetimes();
@@ -832,7 +824,6 @@ val intermediateOption = {val_name}.option() ?: return null
         cleanups: &[Cow<'d, str>],
         val_name: &'d str,
         return_type_postfix: &str,
-        use_finalizers_not_cleaners: bool,
     ) -> String {
         match res {
             SuccessType::Write => Self::write_return(return_type_postfix),
@@ -844,7 +835,6 @@ val intermediateOption = {val_name}.option() ?: return null
                 return_type_postfix,
                 "", // error cast
                 o,
-                use_finalizers_not_cleaners,
             ),
             SuccessType::Unit if return_type_postfix.is_empty() => "".into(),
             SuccessType::Unit => format!("return Unit{return_type_postfix}"),
@@ -857,7 +847,6 @@ val intermediateOption = {val_name}.option() ?: return null
         method: &'d Method,
         method_lifetimes_map: MethodLtMap<'d>,
         cleanups: &[Cow<'d, str>],
-        use_finalizers_not_cleaners: bool,
     ) -> String {
         match &method.output {
             ReturnType::Infallible(res) => self.gen_success_return_conversion(
@@ -867,7 +856,6 @@ val intermediateOption = {val_name}.option() ?: return null
                 cleanups,
                 "returnVal",
                 "",
-                use_finalizers_not_cleaners,
             ),
             ReturnType::Fallible(ok, err) => {
                 let ok_path = self.gen_success_return_conversion(
@@ -877,7 +865,6 @@ val intermediateOption = {val_name}.option() ?: return null
                     cleanups,
                     "returnVal.union.ok",
                     ".ok()",
-                    use_finalizers_not_cleaners,
                 );
 
                 let err_path = err
@@ -928,7 +915,6 @@ val intermediateOption = {val_name}.option() ?: return null
                             err_converter,
                             &err_cast,
                             err,
-                            use_finalizers_not_cleaners,
                         )
                     })
                     .unwrap_or_else(|| "return UnitError().err()".into());
@@ -953,7 +939,6 @@ val intermediateOption = {val_name}.option() ?: return null
                     cleanups,
                     "returnVal",
                     res,
-                    use_finalizers_not_cleaners,
                 ),
 
             ReturnType::Nullable(SuccessType::Write) => format!(
@@ -963,8 +948,26 @@ returnVal.option() ?: return null
                         "#,
                 Self::write_return("")
             ),
-            ReturnType::Nullable(SuccessType::Unit) => "returnVal.option() ?: return null".into(),
+            ReturnType::Nullable(SuccessType::Unit) => "return returnVal.option()".into(),
             _ => panic!("unsupported type"),
+        }
+    }
+
+    fn slice_method_for<P: TyPosition>(&self, slice_type: &Slice<P>) -> &'static str {
+        match slice_type {
+            Slice::Str(Some(_), StringEncoding::UnvalidatedUtf16) => "borrowUtf16",
+            Slice::Str(None, StringEncoding::UnvalidatedUtf16) => "moveUtf16",
+            Slice::Str(Some(_), _) => "borrowUtf8",
+            Slice::Str(None, _) => "moveUtf8",
+            Slice::Primitive(MaybeOwn::Borrow(_), _) => "borrow",
+            Slice::Primitive(_, _) => "move",
+            Slice::Strs(StringEncoding::UnvalidatedUtf16) => "borrowUtf16s",
+            Slice::Strs(_) => "borrowUtf8s",
+            _ => {
+                self.errors
+                    .push_error("Found unsupported slice type".into());
+                ""
+            }
         }
     }
 
@@ -978,28 +981,12 @@ returnVal.option() ?: return null
         struct SliceConv<'d> {
             slice_method: Cow<'d, str>,
             kt_param_name: Cow<'d, str>,
-            closeable: bool,
         }
-        let (slice_method, closeable): (Cow<'cx, str>, bool) = match slice_type {
-            Slice::Str(Some(_), StringEncoding::UnvalidatedUtf16) => ("borrowUtf16".into(), true),
-            Slice::Str(None, StringEncoding::UnvalidatedUtf16) => ("moveUtf16".into(), true),
-            Slice::Str(Some(_), _) => ("borrowUtf8".into(), true),
-            Slice::Str(None, _) => ("moveUtf8".into(), true),
-            Slice::Primitive(MaybeOwn::Borrow(_), _) => ("borrow".into(), true),
-            Slice::Primitive(_, _) => ("move".into(), true),
-            Slice::Strs(StringEncoding::UnvalidatedUtf16) => ("borrowUtf16s".into(), true),
-            Slice::Strs(_) => ("borrowUtf8s".into(), true),
-            _ => {
-                self.errors
-                    .push_error("Found unsupported slice type".into());
-                ("".into(), false)
-            }
-        };
+        let slice_method = self.slice_method_for(&slice_type).into();
 
         SliceConv {
             kt_param_name,
             slice_method,
-            closeable,
         }
         .render()
         .expect("Failed to render slice method")
@@ -1011,18 +998,15 @@ returnVal.option() ?: return null
         param_name: Cow<'cx, str>,
         slice: Slice<P>,
     ) -> Option<Cow<'cx, str>> {
+        // TODO(#1003) Is this actually needed?
         match slice {
-            Slice::Str(Some(_), _) => {
-                Some(format!("if ({param_name}Mem != null) {param_name}Mem.close()").into())
-            }
+            Slice::Str(Some(_), _) => Some(format!("{param_name}SliceMemory?.close()").into()),
             Slice::Str(_, _) => None,
             Slice::Primitive(MaybeOwn::Borrow(_), _) => {
-                Some(format!("if ({param_name}Mem != null) {param_name}Mem.close()").into())
+                Some(format!("{param_name}SliceMemory?.close()").into())
             }
             Slice::Primitive(_, _) => None,
-            Slice::Strs(_) => {
-                Some(format!("{param_name}Mem.forEach {{if (it != null) it.close()}}").into())
-            }
+            Slice::Strs(_) => Some(format!("{param_name}SliceMemory?.close()").into()),
             _ => todo!(),
         }
     }
@@ -1033,9 +1017,9 @@ returnVal.option() ?: return null
         method: &'cx hir::Method,
         self_type: Option<&'cx SelfType>,
         struct_name: Option<&str>,
-        use_finalizers_not_cleaners: bool,
         add_override_specifier_for_opaque_self_methods: bool,
     ) -> MethodInfo {
+        let _guard = self.errors.set_context_method(method.name.as_str().into());
         if method.attrs.disable {
             return MethodInfo::default();
         }
@@ -1061,7 +1045,7 @@ returnVal.option() ?: return null
             Some(st @ SelfType::Struct(s)) => {
                 let param_type =
                     format!("{}Native", self.tcx.resolve_struct(s.tcx_id).name.as_str()).into();
-                let param_name: Cow<'_, str> = "nativeStruct".into();
+                let param_name: Cow<'_, str> = "this.toNative()".into();
                 visitor.visit_param(&st.clone().into(), "this");
                 param_types_ffi.push(param_type);
                 param_conversions.push(param_name.clone());
@@ -1096,7 +1080,7 @@ returnVal.option() ?: return null
                                 cleanups.push(cleanup)
                             }
                         }
-                        ParamBorrowInfo::BorrowedSlice => (),
+                        ParamBorrowInfo::BorrowedSlice => self.errors.push_error("Kotlin backend does not support borrowing slices across functions (#1003)".into()),
                         ParamBorrowInfo::BorrowedOpaque => (),
                         ParamBorrowInfo::NotBorrowed => (),
                         _ => todo!(),
@@ -1137,11 +1121,17 @@ returnVal.option() ?: return null
                         .zip(param_input_types.iter())
                         .zip(param_names.iter())
                         .map(|((in_param, in_ty), in_name)| match in_param.ty {
-                            Type::Enum(_) | Type::Struct(_) => {
+                            Type::Struct(_) | Type::Enum(_) => {
+                                if let Type::Struct(ref s) = in_param.ty {
+                                    assert!(
+                                        s.lifetimes().lifetimes().len() == 0,
+                                        "Code did not expect structs with lifetimes"
+                                    );
+                                }
                                 // named types have a _Native wrapper, this needs to be passed as the "native"
                                 // version of the argument
                                 (
-                                    format!("{in_ty}({in_name})"),
+                                    format!("{in_ty}.fromNative({in_name})"),
                                     format!("{in_name}: {in_ty}Native"),
                                 )
                             }
@@ -1168,8 +1158,7 @@ returnVal.option() ?: return null
                             SuccessType::OutType(ty) => (
                                 self.gen_native_type_name(ty, None).into(),
                                 match ty {
-                                    Type::Enum(..) => ".toNative()",
-                                    Type::Struct(..) => ".nativeStruct",
+                                    Type::Enum(..) | Type::Struct(..) => ".toNative()",
                                     _ => "",
                                 }
                                 .into(),
@@ -1210,7 +1199,7 @@ returnVal.option() ?: return null
                 param_name.clone()
             };
             param_types_ffi.push(param_type_ffi);
-            param_conversions.push(self.gen_kt_to_c_for_type(&param.ty, param_name_to_pass));
+            param_conversions.push(self.gen_kt_to_c_for_type(&param.ty, param_name_to_pass, true));
         }
         let write_return = matches!(
             &method.output,
@@ -1227,12 +1216,7 @@ returnVal.option() ?: return null
 
         let method_lifetimes_map = visitor.borrow_map();
         let return_expression = self
-            .gen_return_conversion(
-                method,
-                method_lifetimes_map,
-                cleanups.as_ref(),
-                use_finalizers_not_cleaners,
-            )
+            .gen_return_conversion(method, method_lifetimes_map, cleanups.as_ref())
             .into();
 
         // this should only be called in the special method generation below
@@ -1377,14 +1361,7 @@ returnVal.option() ?: return null
         }
     }
 
-    fn gen_opaque_def(
-        &mut self,
-        ty: &'cx hir::OpaqueDef,
-        type_name: &str,
-        domain: &str,
-        lib_name: &str,
-        use_finalizers_not_cleaners: bool,
-    ) -> (String, String) {
+    fn gen_opaque_def(&mut self, ty: &'cx hir::OpaqueDef, type_name: &str) -> (String, String) {
         let native_methods = ty
             .methods
             .iter()
@@ -1409,7 +1386,6 @@ returnVal.option() ?: return null
                     method,
                     Some(self_param),
                     None,
-                    use_finalizers_not_cleaners,
                     ty.attrs.generate_mocking_interface, // Add override specifier when interface is generated for opaque self methods
                 )
             })
@@ -1427,7 +1403,6 @@ returnVal.option() ?: return null
                     method,
                     None,
                     Some(type_name),
-                    use_finalizers_not_cleaners,
                     false, // Add override specifier when interface is generated for opaque self methods
                 )
             })
@@ -1449,6 +1424,7 @@ returnVal.option() ?: return null
         struct ImplTemplate<'a> {
             domain: &'a str,
             lib_name: &'a str,
+            dylib_name: &'a str,
             type_name: &'a str,
             dtor_abi_name: &'a str,
             self_methods: &'a [MethodInfo],
@@ -1464,10 +1440,15 @@ returnVal.option() ?: return null
         }
 
         (
-            format!("{}/{lib_name}/{type_name}.kt", domain.replace('.', "/")),
+            format!(
+                "{}/{lib_name}/{type_name}.kt",
+                self.domain.replace('.', "/"),
+                lib_name = self.lib_name
+            ),
             ImplTemplate {
-                domain,
-                lib_name,
+                domain: self.domain,
+                lib_name: self.lib_name,
+                dylib_name: self.dylib_name,
                 type_name,
                 dtor_abi_name: ty.dtor_abi_name.as_str(),
                 self_methods: self_methods.as_ref(),
@@ -1476,7 +1457,7 @@ returnVal.option() ?: return null
                 lifetimes,
                 special_methods: SpecialMethodsImpl::new(special_methods),
                 callback_params: self.callback_params.as_ref(),
-                use_finalizers_not_cleaners,
+                use_finalizers_not_cleaners: self.use_finalizers_not_cleaners,
                 docs: self.formatter.fmt_docs(&ty.docs),
                 is_custom_error: ty.attrs.custom_errors,
                 generate_mocking_interface: (ty.attrs.generate_mocking_interface
@@ -1491,9 +1472,6 @@ returnVal.option() ?: return null
         &mut self,
         ty: &'cx hir::StructDef<P>,
         type_name: &str,
-        domain: &str,
-        lib_name: &str,
-        use_finalizers_not_cleaners: bool,
     ) -> (String, String) {
         let native_methods = ty
             .methods
@@ -1518,7 +1496,6 @@ returnVal.option() ?: return null
                     method,
                     Some(self_param),
                     Some(type_name),
-                    use_finalizers_not_cleaners,
                     false, // Add override specifier when interface is generated for opaque self methods
                 )
             })
@@ -1534,7 +1511,6 @@ returnVal.option() ?: return null
                     method,
                     None,
                     Some(type_name),
-                    use_finalizers_not_cleaners,
                     false, // Add override specifier when interface is generated for opaque self methods
                 )
             })
@@ -1557,6 +1533,7 @@ returnVal.option() ?: return null
             ffi_cast_type_name: Cow<'d, str>,
             field_type: Cow<'d, str>,
             native_to_kt: Cow<'d, str>,
+            kt_to_native: Option<Cow<'d, str>>,
             docs: String,
         }
 
@@ -1565,6 +1542,7 @@ returnVal.option() ?: return null
         struct ImplTemplate<'a> {
             domain: &'a str,
             lib_name: &'a str,
+            dylib_name: &'a str,
             type_name: &'a str,
             fields: Vec<StructFieldDef<'a>>,
             self_methods: &'a [MethodInfo],
@@ -1574,34 +1552,59 @@ returnVal.option() ?: return null
             lifetimes: Vec<Cow<'a, str>>,
             docs: String,
             is_custom_error: bool,
+            is_out_struct: bool,
         }
+
+        let non_out_struct = if let TypeDef::Struct(s) = P::wrap_struct_def(ty) {
+            Some(s)
+        } else {
+            None
+        };
 
         let fields = ty
             .fields
             .iter()
-            .map(|field: &StructField<P>| {
+            .enumerate()
+            .map(|(i, field)| {
                 let field_name = self.formatter.fmt_field_name(field.name.as_str());
+                let field_access = format!("nativeStruct.{field_name}");
+                let field_access = &field_access;
 
+                let kt_to_native = non_out_struct.map(|nonout| {
+                    self.gen_kt_to_c_for_type(
+                        &nonout.fields[i].ty,
+                        format!("this.{field_name}").into(),
+                        false,
+                    )
+                });
                 StructFieldDef {
                     name: field_name.clone(),
-                    ffi_type_default: self.formatter.fmt_field_default(&field.ty),
+                    ffi_type_default: self
+                        .formatter
+                        .fmt_field_default(&field.ty, /* for_results */ false),
                     ffi_cast_type_name: self.formatter.fmt_struct_field_type_native(&field.ty),
                     field_type: self.formatter.fmt_struct_field_type_kt(&field.ty),
                     native_to_kt: self.formatter.fmt_struct_field_native_to_kt(
-                        field_name.as_ref(),
+                        field_access,
                         &ty.lifetimes,
                         &field.ty,
                     ),
+                    kt_to_native,
                     docs: self.formatter.fmt_docs(&field.docs),
                 }
             })
             .collect();
 
         (
-            format!("{}/{lib_name}/{type_name}.kt", domain.replace('.', "/"),),
+            format!(
+                "{}/{lib_name}/{type_name}.kt",
+                self.domain.replace('.', "/"),
+                lib_name = self.lib_name
+            ),
             ImplTemplate {
-                domain,
-                lib_name,
+                domain: self.domain,
+                lib_name: self.lib_name,
+                dylib_name: self.dylib_name,
                 type_name,
                 fields,
                 self_methods: self_methods.as_ref(),
@@ -1611,6 +1614,7 @@ returnVal.option() ?: return null
                 lifetimes,
                 docs: self.formatter.fmt_docs(&ty.docs),
                 is_custom_error: ty.attrs.custom_errors,
+                is_out_struct: non_out_struct.is_none(),
             }
             .render()
             .expect("Failed to render struct template"),
@@ -1646,11 +1650,11 @@ returnVal.option() ?: return null
                 .zip(param_input_types.iter())
                 .zip(param_names.iter())
                 .map(|((in_param, in_ty), in_name)| match in_param.ty {
-                    Type::Enum(_) | Type::Struct(_) => {
+                    Type::Struct(_) | Type::Enum(_) => {
                         // named types have a _Native wrapper, this needs to be passed as the "native"
                         // version of the argument
                         (
-                            format!("{in_ty}({in_name})"),
+                            format!("{in_ty}.fromNative({in_name})"),
                             format!("{in_name}: {in_ty}Native"),
                         )
                     }
@@ -1686,8 +1690,7 @@ returnVal.option() ?: return null
                 SuccessType::OutType(ty) => (
                     self.gen_native_type_name(ty, None).into(),
                     match ty {
-                        Type::Enum(..) => ".toNative()",
-                        Type::Struct(..) => ".nativeStruct",
+                        Type::Enum(..) | Type::Struct(..) => ".toNative()",
                         _ => "",
                     }
                     .into(),
@@ -1733,13 +1736,7 @@ returnVal.option() ?: return null
         }
     }
 
-    fn gen_trait_def(
-        &mut self,
-        trt: &'cx hir::TraitDef,
-        trait_name: &str,
-        domain: &str,
-        lib_name: &str,
-    ) -> (String, String) {
+    fn gen_trait_def(&mut self, trt: &'cx hir::TraitDef, trait_name: &str) -> (String, String) {
         let trait_methods = trt
             .methods
             .iter()
@@ -1770,10 +1767,14 @@ returnVal.option() ?: return null
         }
 
         (
-            format!("{}/{lib_name}/{trait_name}.kt", domain.replace('.', "/"),),
+            format!(
+                "{}/{lib_name}/{trait_name}.kt",
+                self.domain.replace('.', "/"),
+                lib_name = self.lib_name
+            ),
             ImplTemplate {
-                domain,
-                lib_name,
+                domain: self.domain,
+                lib_name: self.lib_name,
                 trait_name,
                 trait_methods: trait_methods.as_ref(),
                 callback_params: self.callback_params.as_ref(),
@@ -1785,14 +1786,7 @@ returnVal.option() ?: return null
         )
     }
 
-    fn gen_enum_def(
-        &mut self,
-        ty: &'cx hir::EnumDef,
-        type_name: &str,
-        domain: &str,
-        lib_name: &str,
-        use_finalizers_not_cleaners: bool,
-    ) -> (String, String) {
+    fn gen_enum_def(&mut self, ty: &'cx hir::EnumDef, type_name: &str) -> (String, String) {
         let native_methods = ty
             .methods
             .iter()
@@ -1817,7 +1811,6 @@ returnVal.option() ?: return null
                     method,
                     Some(self_param),
                     None,
-                    use_finalizers_not_cleaners,
                     false, // Add override specifier when interface is generated for opaque self methods
                 )
             })
@@ -1834,7 +1827,6 @@ returnVal.option() ?: return null
                     method,
                     None,
                     None,
-                    use_finalizers_not_cleaners,
                     false, // Add override specifier when interface is generated for opaque self methods
                 )
             })
@@ -1894,8 +1886,9 @@ returnVal.option() ?: return null
         #[derive(Template)]
         #[template(path = "kotlin/Enum.kt.jinja", escape = "none")]
         struct EnumDef<'d> {
-            lib_name: Cow<'d, str>,
-            domain: Cow<'d, str>,
+            lib_name: &'d str,
+            dylib_name: &'d str,
+            domain: &'d str,
             type_name: Cow<'d, str>,
             variants: &'d EnumVariants<'d>,
             self_methods: &'d [MethodInfo],
@@ -1909,8 +1902,9 @@ returnVal.option() ?: return null
         let variants = EnumVariants::new(ty);
 
         let enum_def = EnumDef {
-            lib_name: lib_name.into(),
-            domain: domain.into(),
+            lib_name: self.lib_name,
+            dylib_name: self.dylib_name,
+            domain: self.domain,
             type_name: type_name.into(),
             variants: &variants,
             self_methods: self_methods.as_ref(),
@@ -1924,7 +1918,11 @@ returnVal.option() ?: return null
         .unwrap_or_else(|err| panic!("Failed to render Enum {{type_name}}\n\tcause: {err}"));
 
         (
-            format!("{}/{lib_name}/{type_name}.kt", domain.replace('.', "/"),),
+            format!(
+                "{}/{lib_name}/{type_name}.kt",
+                self.domain.replace('.', "/"),
+                lib_name = self.lib_name
+            ),
             enum_def,
         )
     }
@@ -1954,6 +1952,10 @@ returnVal.option() ?: return null
                     self.formatter.fmt_trait_name(op_id)
                 )
                 .into()
+            }
+            Type::DiplomatOption(ref inner) => {
+                assert!(additional_name.is_none());
+                format!("Option{}", self.gen_native_type_name(inner, None)).into()
             }
             _ => unreachable!("unknown AST/HIR variant"),
         }
@@ -2000,6 +2002,10 @@ returnVal.option() ?: return null
                 self.formatter.fmt_primitive_slice(ty).into()
             }
             Type::Callback(_) => format!("DiplomatCallback_{}", additional_name.unwrap()).into(),
+            Type::DiplomatOption(ref inner) => {
+                assert!(additional_name.is_none());
+                format!("{}?", self.gen_type_name(inner, None)).into()
+            }
             Type::Slice(hir::Slice::Strs(_)) => self.formatter.fmt_str_slices().into(),
             _ => unreachable!("unknown AST/HIR variant"),
         }
@@ -2158,7 +2164,7 @@ mod test {
     use crate::ErrorStore;
 
     use super::formatter::test::new_tcx;
-    use super::{formatter::KotlinFormatter, TyGenContext};
+    use super::{formatter::KotlinFormatter, ItemGenContext};
 
     #[test]
     fn test_enum() {
@@ -2206,18 +2212,20 @@ mod test {
                 diplomat_core::hir::DocsUrlGenerator::with_base_urls(None, docs_urls);
             let formatter = KotlinFormatter::new(&tcx, None, &docs_generator);
             let mut callback_params = Vec::new();
-            let mut ty_gen_cx = TyGenContext {
+            let mut ty_gen_cx = ItemGenContext {
                 tcx: &tcx,
                 formatter: &formatter,
                 result_types: RefCell::new(BTreeSet::new()),
-                option_types: RefCell::new(BTreeSet::new()),
                 errors: &error_store,
                 callback_params: &mut callback_params,
+                lib_name: "somelib",
+                dylib_name: "somelib",
+                domain: "dev.diplomattest",
+                use_finalizers_not_cleaners: false,
             };
             let type_name = enum_def.name.to_string();
             // test that we can render and that it doesn't panic
-            let (_, enum_code) =
-                ty_gen_cx.gen_enum_def(enum_def, &type_name, "dev.diplomattest", "somelib", false);
+            let (_, enum_code) = ty_gen_cx.gen_enum_def(enum_def, &type_name);
             insta::assert_snapshot!(enum_code)
         }
     }
@@ -2294,18 +2302,20 @@ mod test {
                 diplomat_core::hir::DocsUrlGenerator::with_base_urls(None, docs_urls);
             let formatter = KotlinFormatter::new(&tcx, None, &docs_generator);
             let mut callback_params = Vec::new();
-            let mut ty_gen_cx = TyGenContext {
+            let mut ty_gen_cx = ItemGenContext {
                 tcx: &tcx,
                 formatter: &formatter,
                 result_types: RefCell::new(BTreeSet::new()),
-                option_types: RefCell::new(BTreeSet::new()),
                 errors: &error_store,
                 callback_params: &mut callback_params,
+                lib_name: "somelib",
+                dylib_name: "somelib",
+                domain: "dev.diplomattest",
+                use_finalizers_not_cleaners: false,
             };
             let type_name = strct.name.to_string();
             // test that we can render and that it doesn't panic
-            let (_, struct_code) =
-                ty_gen_cx.gen_struct_def(strct, &type_name, "dev.diplomattest", "somelib", false);
+            let (_, struct_code) = ty_gen_cx.gen_struct_def(strct, &type_name);
             insta::assert_snapshot!(struct_code)
         }
     }
@@ -2346,23 +2356,20 @@ mod test {
                 diplomat_core::hir::DocsUrlGenerator::with_base_urls(None, docs_urls);
             let formatter = KotlinFormatter::new(&tcx, None, &docs_generator);
             let mut callback_params = Vec::new();
-            let mut ty_gen_cx = TyGenContext {
+            let mut ty_gen_cx = ItemGenContext {
                 tcx: &tcx,
                 formatter: &formatter,
                 result_types: RefCell::new(BTreeSet::new()),
-                option_types: RefCell::new(BTreeSet::new()),
                 errors: &eror_store,
                 callback_params: &mut callback_params,
+                lib_name: "somelib",
+                dylib_name: "somelib",
+                domain: "dev.diplomattest",
+                use_finalizers_not_cleaners: false,
             };
             let type_name = opaque_def.name.to_string();
             // test that we can render and that it doesn't panic
-            let (_, result) = ty_gen_cx.gen_opaque_def(
-                opaque_def,
-                &type_name,
-                "dev.diplomattest",
-                "somelib",
-                false,
-            );
+            let (_, result) = ty_gen_cx.gen_opaque_def(opaque_def, &type_name);
             insta::assert_snapshot!(result)
         }
     }
@@ -2460,23 +2467,20 @@ mod test {
                 diplomat_core::hir::DocsUrlGenerator::with_base_urls(None, docs_urls);
             let formatter = KotlinFormatter::new(&tcx, None, &docs_generator);
             let mut callback_params = Vec::new();
-            let mut ty_gen_cx = TyGenContext {
+            let mut ty_gen_cx = ItemGenContext {
                 tcx: &tcx,
                 formatter: &formatter,
                 result_types: RefCell::new(BTreeSet::new()),
-                option_types: RefCell::new(BTreeSet::new()),
                 errors: &eror_store,
                 callback_params: &mut callback_params,
+                lib_name: "somelib",
+                dylib_name: "somelib",
+                domain: "dev.diplomattest",
+                use_finalizers_not_cleaners: false,
             };
             let type_name = opaque_def.name.to_string();
             // test that we can render and that it doesn't panic
-            let (_, result) = ty_gen_cx.gen_opaque_def(
-                opaque_def,
-                &type_name,
-                "dev.diplomattest",
-                "somelib",
-                false,
-            );
+            let (_, result) = ty_gen_cx.gen_opaque_def(opaque_def, &type_name);
             insta::assert_snapshot!(result)
         }
     }
@@ -2516,23 +2520,20 @@ mod test {
                 diplomat_core::hir::DocsUrlGenerator::with_base_urls(None, docs_urls);
             let formatter = KotlinFormatter::new(&tcx, None, &docs_generator);
             let mut callback_params = Vec::new();
-            let mut ty_gen_cx = TyGenContext {
+            let mut ty_gen_cx = ItemGenContext {
                 tcx: &tcx,
                 formatter: &formatter,
                 result_types: RefCell::new(BTreeSet::new()),
-                option_types: RefCell::new(BTreeSet::new()),
                 errors: &eror_store,
                 callback_params: &mut callback_params,
+                lib_name: "somelib",
+                dylib_name: "somelib",
+                domain: "dev.diplomattest",
+                use_finalizers_not_cleaners: true,
             };
             let type_name = opaque_def.name.to_string();
             // test that we can render and that it doesn't panic
-            let (_, result) = ty_gen_cx.gen_opaque_def(
-                opaque_def,
-                &type_name,
-                "dev.diplomattest",
-                "somelib",
-                true,
-            );
+            let (_, result) = ty_gen_cx.gen_opaque_def(opaque_def, &type_name);
             insta::assert_snapshot!(result)
         }
     }
@@ -2585,18 +2586,20 @@ mod test {
         let docs_generator = diplomat_core::hir::DocsUrlGenerator::with_base_urls(None, docs_urls);
         let formatter = KotlinFormatter::new(&tcx, None, &docs_generator);
         let mut callback_params = Vec::new();
-        let mut ty_gen_cx = TyGenContext {
+        let mut ty_gen_cx = ItemGenContext {
             tcx: &tcx,
             formatter: &formatter,
             result_types: RefCell::new(BTreeSet::new()),
-            option_types: RefCell::new(BTreeSet::new()),
             errors: &error_store,
             callback_params: &mut callback_params,
+            lib_name: "somelib",
+            dylib_name: "somelib",
+            domain: "dev.diplomattest",
+            use_finalizers_not_cleaners: false,
         };
         let trait_name = trait_def.name.to_string();
         // test that we can render and that it doesn't panic
-        let (_, result) =
-            ty_gen_cx.gen_trait_def(trait_def, &trait_name, "dev.diplomattest", "somelib");
+        let (_, result) = ty_gen_cx.gen_trait_def(trait_def, &trait_name);
         insta::assert_snapshot!(result)
     }
 
@@ -2636,23 +2639,20 @@ mod test {
                 diplomat_core::hir::DocsUrlGenerator::with_base_urls(None, docs_urls);
             let formatter = KotlinFormatter::new(&tcx, None, &docs_generator);
             let mut callback_params = Vec::new();
-            let mut ty_gen_cx = TyGenContext {
+            let mut ty_gen_cx = ItemGenContext {
                 tcx: &tcx,
                 formatter: &formatter,
                 result_types: RefCell::new(BTreeSet::new()),
-                option_types: RefCell::new(BTreeSet::new()),
                 errors: &eror_store,
                 callback_params: &mut callback_params,
+                lib_name: "somelib",
+                dylib_name: "somelib",
+                domain: "dev.diplomattest",
+                use_finalizers_not_cleaners: true,
             };
             let type_name = opaque_def.name.to_string();
             // test that we can render and that it doesn't panic
-            let (_, result) = ty_gen_cx.gen_opaque_def(
-                opaque_def,
-                &type_name,
-                "dev.diplomattest",
-                "somelib",
-                true,
-            );
+            let (_, result) = ty_gen_cx.gen_opaque_def(opaque_def, &type_name);
             insta::assert_snapshot!(result)
         }
     }

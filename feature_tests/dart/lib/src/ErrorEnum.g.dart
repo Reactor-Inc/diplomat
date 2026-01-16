@@ -4,9 +4,9 @@
 part of 'lib.g.dart';
 
 enum ErrorEnum {
-
+  // ignore: public_member_api_docs
   foo,
-
+  // ignore: public_member_api_docs
   bar;
 
 }

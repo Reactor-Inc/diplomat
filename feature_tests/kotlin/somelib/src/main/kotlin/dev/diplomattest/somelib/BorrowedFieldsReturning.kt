@@ -19,16 +19,68 @@ internal class BorrowedFieldsReturningNative: Structure(), Structure.ByValue {
     }
 }
 
-class BorrowedFieldsReturning internal constructor (
-    internal val nativeStruct: BorrowedFieldsReturningNative,
-    internal val aEdges: List<Any?>
-    ) {
-    val bytes: String = PrimitiveArrayTools.getUtf8(nativeStruct.bytes)
 
-    companion object {
-        internal val libClass: Class<BorrowedFieldsReturningLib> = BorrowedFieldsReturningLib::class.java
-        internal val lib: BorrowedFieldsReturningLib = Native.load("somelib", libClass)
-        val NATIVESIZE: Long = Native.getNativeSize(BorrowedFieldsReturningNative::class.java).toLong()
+
+
+internal class OptionBorrowedFieldsReturningNative constructor(): Structure(), Structure.ByValue {
+    @JvmField
+    internal var value: BorrowedFieldsReturningNative = BorrowedFieldsReturningNative()
+
+    @JvmField
+    internal var isOk: Byte = 0
+
+    // Define the fields of the struct
+    override fun getFieldOrder(): List<String> {
+        return listOf("value", "isOk")
     }
 
+    internal fun option(): BorrowedFieldsReturningNative? {
+        if (isOk == 1.toByte()) {
+            return value
+        } else {
+            return null
+        }
+    }
+
+
+    constructor(value: BorrowedFieldsReturningNative, isOk: Byte): this() {
+        this.value = value
+        this.isOk = isOk
+    }
+
+    companion object {
+        internal fun some(value: BorrowedFieldsReturningNative): OptionBorrowedFieldsReturningNative {
+            return OptionBorrowedFieldsReturningNative(value, 1)
+        }
+
+        internal fun none(): OptionBorrowedFieldsReturningNative {
+            return OptionBorrowedFieldsReturningNative(BorrowedFieldsReturningNative(), 0)
+        }
+    }
+
+}
+
+class BorrowedFieldsReturning (var bytes: String) {
+    companion object {
+
+        internal val libClass: Class<BorrowedFieldsReturningLib> = BorrowedFieldsReturningLib::class.java
+        internal val lib: BorrowedFieldsReturningLib = Native.load("diplomat_feature_tests", libClass)
+        val NATIVESIZE: Long = Native.getNativeSize(BorrowedFieldsReturningNative::class.java).toLong()
+
+        internal fun fromNative(nativeStruct: BorrowedFieldsReturningNative, aEdges: List<Any?>): BorrowedFieldsReturning {
+            val bytes: String = PrimitiveArrayTools.getUtf8(nativeStruct.bytes)
+
+            return BorrowedFieldsReturning(bytes)
+        }
+
+    }
+    internal fun toNative(): BorrowedFieldsReturningNative {
+        var native = BorrowedFieldsReturningNative()
+        native.bytes = PrimitiveArrayTools.borrowUtf8(this.bytes).slice
+        return native
+    }
+
+    internal fun aEdges(): List<Any?> {
+        return TODO("todo")
+    }
 }

@@ -8,6 +8,8 @@
 #include "../include/PrimitiveStructVec.hpp"
 #include "assert.hpp"
 
+using namespace somelib;
+
 int main(int argc, char *argv[])
 {
 
@@ -78,6 +80,11 @@ int main(int argc, char *argv[])
             op.set_str("split");
         }, *opaque);
         simple_assert_eq("opaque cb arg", opaque->borrow(), "split");
+    }
+    {
+        std::array<diplomat::string_view_for_slice, 2> names{"Banana", "Apple"};
+        auto opaque = MyString::new_from_first(names);
+        simple_assert_eq("opaque cb arg", opaque->borrow(), "Banana");
     }
 
     {

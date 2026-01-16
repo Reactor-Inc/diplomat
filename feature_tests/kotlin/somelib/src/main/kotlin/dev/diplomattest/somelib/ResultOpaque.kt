@@ -35,7 +35,7 @@ class ResultOpaque internal constructor (
 
     companion object {
         internal val libClass: Class<ResultOpaqueLib> = ResultOpaqueLib::class.java
-        internal val lib: ResultOpaqueLib = Native.load("somelib", libClass)
+        internal val lib: ResultOpaqueLib = Native.load("diplomat_feature_tests", libClass)
         @JvmStatic
         
         fun new_(i: Int): Result<ResultOpaque> {
@@ -109,7 +109,7 @@ class ResultOpaque internal constructor (
                 return returnOpaque.ok()
             } else {
                 
-                val returnStruct = ErrorStruct(returnVal.union.err)
+                val returnStruct = ErrorStruct.fromNative(returnVal.union.err)
                 return returnStruct.err()
             }
         }
@@ -171,13 +171,13 @@ class ResultOpaque internal constructor (
     *Test that this interacts gracefully with returning a reference type
     */
     fun takesStr(v: String): ResultOpaque {
-        val (vMem, vSlice) = PrimitiveArrayTools.borrowUtf8(v)
+        val vSliceMemory = PrimitiveArrayTools.borrowUtf8(v)
         
-        val returnVal = lib.ResultOpaque_takes_str(handle, vSlice);
+        val returnVal = lib.ResultOpaque_takes_str(handle, vSliceMemory.slice);
         val selfEdges: List<Any> = listOf(this)
         val handle = returnVal 
         val returnOpaque = ResultOpaque(handle, selfEdges)
-        if (vMem != null) vMem.close()
+        vSliceMemory?.close()
         return returnOpaque
     }
     

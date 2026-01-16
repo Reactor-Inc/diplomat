@@ -1,5 +1,5 @@
-#ifndef ns_RenamedDeprecatedStruct_HPP
-#define ns_RenamedDeprecatedStruct_HPP
+#ifndef SOMELIB_ns_RenamedDeprecatedStruct_HPP
+#define SOMELIB_ns_RenamedDeprecatedStruct_HPP
 
 #include "RenamedDeprecatedStruct.d.hpp"
 
@@ -14,15 +14,13 @@
 #include "../diplomat_runtime.hpp"
 
 
-namespace ns {
+namespace somelib::ns {
 namespace capi {
-    extern "C" {
 
-    } // extern "C"
 } // namespace capi
 } // namespace
 
 
 
 
-#endif // ns_RenamedDeprecatedStruct_HPP
+#endif // SOMELIB_ns_RenamedDeprecatedStruct_HPP

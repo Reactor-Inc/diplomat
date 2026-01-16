@@ -32,7 +32,7 @@ class Opaque internal constructor (
 
     companion object {
         internal val libClass: Class<OpaqueLib> = OpaqueLib::class.java
-        internal val lib: OpaqueLib = Native.load("somelib", libClass)
+        internal val lib: OpaqueLib = Native.load("diplomat_feature_tests", libClass)
         @JvmStatic
         
         fun new_(): Opaque {
@@ -47,27 +47,27 @@ class Opaque internal constructor (
         @JvmStatic
         
         fun tryFromUtf8(input: String): Opaque? {
-            val (inputMem, inputSlice) = PrimitiveArrayTools.borrowUtf8(input)
+            val inputSliceMemory = PrimitiveArrayTools.borrowUtf8(input)
             
-            val returnVal = lib.Opaque_try_from_utf8(inputSlice);
+            val returnVal = lib.Opaque_try_from_utf8(inputSliceMemory.slice);
             val selfEdges: List<Any> = listOf()
             val handle = returnVal ?: return null
             val returnOpaque = Opaque(handle, selfEdges)
             CLEANER.register(returnOpaque, Opaque.OpaqueCleaner(handle, Opaque.lib));
-            if (inputMem != null) inputMem.close()
+            inputSliceMemory?.close()
             return returnOpaque
         }
         @JvmStatic
         
         fun fromStr(input: String): Opaque {
-            val (inputMem, inputSlice) = PrimitiveArrayTools.borrowUtf8(input)
+            val inputSliceMemory = PrimitiveArrayTools.borrowUtf8(input)
             
-            val returnVal = lib.Opaque_from_str(inputSlice);
+            val returnVal = lib.Opaque_from_str(inputSliceMemory.slice);
             val selfEdges: List<Any> = listOf()
             val handle = returnVal 
             val returnOpaque = Opaque(handle, selfEdges)
             CLEANER.register(returnOpaque, Opaque.OpaqueCleaner(handle, Opaque.lib));
-            if (inputMem != null) inputMem.close()
+            inputSliceMemory?.close()
             return returnOpaque
         }
         @JvmStatic
@@ -83,7 +83,7 @@ class Opaque internal constructor (
             
             val returnVal = lib.Opaque_returns_imported();
             
-            val returnStruct = ImportedStruct(returnVal)
+            val returnStruct = ImportedStruct.fromNative(returnVal)
             return returnStruct
         }
         @JvmStatic
@@ -111,7 +111,7 @@ class Opaque internal constructor (
     */
     fun assertStruct(s: MyStruct): Unit {
         
-        val returnVal = lib.Opaque_assert_struct(handle, s.nativeStruct);
+        val returnVal = lib.Opaque_assert_struct(handle, s.toNative());
         
     }
 

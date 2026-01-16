@@ -27,18 +27,18 @@ class OptionString internal constructor (
 
     companion object {
         internal val libClass: Class<OptionStringLib> = OptionStringLib::class.java
-        internal val lib: OptionStringLib = Native.load("somelib", libClass)
+        internal val lib: OptionStringLib = Native.load("diplomat_feature_tests", libClass)
         @JvmStatic
         
         fun new_(diplomatStr: String): OptionString? {
-            val (diplomatStrMem, diplomatStrSlice) = PrimitiveArrayTools.borrowUtf8(diplomatStr)
+            val diplomatStrSliceMemory = PrimitiveArrayTools.borrowUtf8(diplomatStr)
             
-            val returnVal = lib.OptionString_new(diplomatStrSlice);
+            val returnVal = lib.OptionString_new(diplomatStrSliceMemory.slice);
             val selfEdges: List<Any> = listOf()
             val handle = returnVal ?: return null
             val returnOpaque = OptionString(handle, selfEdges)
             CLEANER.register(returnOpaque, OptionString.OptionStringCleaner(handle, OptionString.lib));
-            if (diplomatStrMem != null) diplomatStrMem.close()
+            diplomatStrSliceMemory?.close()
             return returnOpaque
         }
     }

@@ -7,6 +7,7 @@ import com.sun.jna.Structure
 
 internal interface OpaqueIterableLib: Library {
     fun namespace_OpaqueIterable_destroy(handle: Pointer)
+    fun namespace_OpaqueIterable_new(size: FFISizet): Pointer
     fun namespace_OpaqueIterable_iter(handle: Pointer): Pointer
 }
 
@@ -25,7 +26,18 @@ class OpaqueIterable internal constructor (
 
     companion object {
         internal val libClass: Class<OpaqueIterableLib> = OpaqueIterableLib::class.java
-        internal val lib: OpaqueIterableLib = Native.load("somelib", libClass)
+        internal val lib: OpaqueIterableLib = Native.load("diplomat_feature_tests", libClass)
+        @JvmStatic
+        
+        fun new_(size: ULong): OpaqueIterable {
+            
+            val returnVal = lib.namespace_OpaqueIterable_new(FFISizet(size));
+            val selfEdges: List<Any> = listOf()
+            val handle = returnVal 
+            val returnOpaque = OpaqueIterable(handle, selfEdges)
+            CLEANER.register(returnOpaque, OpaqueIterable.OpaqueIterableCleaner(handle, OpaqueIterable.lib));
+            return returnOpaque
+        }
     }
     
     override fun iterator(): OpaqueIterator {

@@ -16,6 +16,8 @@ export { BorrowedFieldsWithBounds } from "./BorrowedFieldsWithBounds.mjs"
 
 export { NestedBorrowedFields } from "./NestedBorrowedFields.mjs"
 
+export { BorrowingOptionStruct } from "./BorrowingOptionStruct.mjs"
+
 export { OptionInputStruct } from "./OptionInputStruct.mjs"
 
 export { ErrorStruct } from "./ErrorStruct.mjs"
@@ -59,6 +61,10 @@ export { RenamedNested2 } from "./RenamedNested2.mjs"
 export { RenamedOpaqueIterable } from "./RenamedOpaqueIterable.mjs"
 
 export { RenamedOpaqueIterator } from "./RenamedOpaqueIterator.mjs"
+
+export { RenamedOpaqueRefIterable } from "./RenamedOpaqueRefIterable.mjs"
+
+export { RenamedOpaqueRefIterator } from "./RenamedOpaqueRefIterator.mjs"
 
 export { RenamedTestOpaque } from "./RenamedTestOpaque.mjs"
 
@@ -119,3 +125,8 @@ export { ContiguousEnum } from "./ContiguousEnum.mjs"
 export { DefaultEnum } from "./DefaultEnum.mjs"
 
 export { MyEnum } from "./MyEnum.mjs"
+
+import wasm from "./diplomat-wasm.mjs";
+import {FUNCTION_PARAM_ALLOC, internalConstructor} from "./diplomat-runtime.mjs";
+
+FUNCTION_PARAM_ALLOC.reserve(internalConstructor, wasm, 40);

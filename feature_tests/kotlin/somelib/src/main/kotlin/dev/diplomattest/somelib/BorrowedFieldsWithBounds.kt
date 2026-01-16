@@ -7,7 +7,6 @@ import com.sun.jna.Pointer
 import com.sun.jna.Structure
 
 internal interface BorrowedFieldsWithBoundsLib: Library {
-    fun BorrowedFieldsWithBounds_from_foo_and_strings(foo: Pointer, dstr16X: Slice, utf8StrZ: Slice): BorrowedFieldsWithBoundsNative
 }
 
 internal class BorrowedFieldsWithBoundsNative: Structure(), Structure.ByValue {
@@ -24,34 +23,78 @@ internal class BorrowedFieldsWithBoundsNative: Structure(), Structure.ByValue {
     }
 }
 
-class BorrowedFieldsWithBounds internal constructor (
-    internal val nativeStruct: BorrowedFieldsWithBoundsNative,
-    internal val aEdges: List<Any?>,
-    internal val bEdges: List<Any?>,
-    internal val cEdges: List<Any?>
-    ) {
-    val fieldA: String = PrimitiveArrayTools.getUtf16(nativeStruct.fieldA)
-    val fieldB: String = PrimitiveArrayTools.getUtf8(nativeStruct.fieldB)
-    val fieldC: String = PrimitiveArrayTools.getUtf8(nativeStruct.fieldC)
 
-    companion object {
-        internal val libClass: Class<BorrowedFieldsWithBoundsLib> = BorrowedFieldsWithBoundsLib::class.java
-        internal val lib: BorrowedFieldsWithBoundsLib = Native.load("somelib", libClass)
-        val NATIVESIZE: Long = Native.getNativeSize(BorrowedFieldsWithBoundsNative::class.java).toLong()
-        @JvmStatic
-        
-        fun fromFooAndStrings(foo: Foo, dstr16X: String, utf8StrZ: String): BorrowedFieldsWithBounds {
-            val (dstr16XMem, dstr16XSlice) = PrimitiveArrayTools.borrowUtf16(dstr16X)
-            val (utf8StrZMem, utf8StrZSlice) = PrimitiveArrayTools.borrowUtf8(utf8StrZ)
-            
-            val returnVal = lib.BorrowedFieldsWithBounds_from_foo_and_strings(foo.handle, dstr16XSlice, utf8StrZSlice);
-            
-            val xEdges: List<Any?> = listOf(foo) + listOf(dstr16XMem) + listOf(utf8StrZMem)
-            val yEdges: List<Any?> = listOf(foo) + listOf(utf8StrZMem)
-            val zEdges: List<Any?> = listOf(utf8StrZMem)
-            val returnStruct = BorrowedFieldsWithBounds(returnVal, xEdges, yEdges, zEdges)
-            return returnStruct
+
+
+internal class OptionBorrowedFieldsWithBoundsNative constructor(): Structure(), Structure.ByValue {
+    @JvmField
+    internal var value: BorrowedFieldsWithBoundsNative = BorrowedFieldsWithBoundsNative()
+
+    @JvmField
+    internal var isOk: Byte = 0
+
+    // Define the fields of the struct
+    override fun getFieldOrder(): List<String> {
+        return listOf("value", "isOk")
+    }
+
+    internal fun option(): BorrowedFieldsWithBoundsNative? {
+        if (isOk == 1.toByte()) {
+            return value
+        } else {
+            return null
         }
     }
 
+
+    constructor(value: BorrowedFieldsWithBoundsNative, isOk: Byte): this() {
+        this.value = value
+        this.isOk = isOk
+    }
+
+    companion object {
+        internal fun some(value: BorrowedFieldsWithBoundsNative): OptionBorrowedFieldsWithBoundsNative {
+            return OptionBorrowedFieldsWithBoundsNative(value, 1)
+        }
+
+        internal fun none(): OptionBorrowedFieldsWithBoundsNative {
+            return OptionBorrowedFieldsWithBoundsNative(BorrowedFieldsWithBoundsNative(), 0)
+        }
+    }
+
+}
+
+class BorrowedFieldsWithBounds (var fieldA: String, var fieldB: String, var fieldC: String) {
+    companion object {
+
+        internal val libClass: Class<BorrowedFieldsWithBoundsLib> = BorrowedFieldsWithBoundsLib::class.java
+        internal val lib: BorrowedFieldsWithBoundsLib = Native.load("diplomat_feature_tests", libClass)
+        val NATIVESIZE: Long = Native.getNativeSize(BorrowedFieldsWithBoundsNative::class.java).toLong()
+
+        internal fun fromNative(nativeStruct: BorrowedFieldsWithBoundsNative, aEdges: List<Any?>, bEdges: List<Any?>, cEdges: List<Any?>): BorrowedFieldsWithBounds {
+            val fieldA: String = PrimitiveArrayTools.getUtf16(nativeStruct.fieldA)
+            val fieldB: String = PrimitiveArrayTools.getUtf8(nativeStruct.fieldB)
+            val fieldC: String = PrimitiveArrayTools.getUtf8(nativeStruct.fieldC)
+
+            return BorrowedFieldsWithBounds(fieldA, fieldB, fieldC)
+        }
+
+    }
+    internal fun toNative(): BorrowedFieldsWithBoundsNative {
+        var native = BorrowedFieldsWithBoundsNative()
+        native.fieldA = PrimitiveArrayTools.borrowUtf16(this.fieldA).slice
+        native.fieldB = PrimitiveArrayTools.borrowUtf8(this.fieldB).slice
+        native.fieldC = PrimitiveArrayTools.borrowUtf8(this.fieldC).slice
+        return native
+    }
+
+    internal fun aEdges(): List<Any?> {
+        return TODO("todo")
+    }
+    internal fun bEdges(): List<Any?> {
+        return TODO("todo")
+    }
+    internal fun cEdges(): List<Any?> {
+        return TODO("todo")
+    }
 }

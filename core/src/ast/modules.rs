@@ -9,6 +9,7 @@ use super::{
     AttrInheritContext, Attrs, CustomType, Enum, Ident, Macros, Method, ModSymbol, Mutability,
     OpaqueType, Path, PathType, RustLink, Struct, Trait,
 };
+use crate::ast::Function;
 use crate::environment::*;
 
 /// Custom Diplomat attribute that can be placed on a struct definition.
@@ -102,6 +103,7 @@ pub struct Module {
     pub imports: Vec<(Path, Ident)>,
     pub declared_types: BTreeMap<Ident, CustomType>,
     pub declared_traits: BTreeMap<Ident, Trait>,
+    pub declared_functions: BTreeMap<Ident, Function>,
     pub sub_modules: Vec<Module>,
     pub attrs: Attrs,
 }
@@ -111,8 +113,13 @@ pub struct Module {
 struct ModuleBuilder {
     custom_types_by_name: BTreeMap<Ident, CustomType>,
     custom_traits_by_name: BTreeMap<Ident, Trait>,
+    functions_by_name: BTreeMap<Ident, Function>,
     sub_modules: Vec<Module>,
     imports: Vec<(Path, Ident)>,
+    /// As we traverse through the module, are we inside of #[diplomat::bridge]?
+    /// If so, then `analyze_types` is set to true, and types, functions, and traits are all updated according to information parsed.
+    ///
+    /// Otherwise, we traverse through modules until we find a module marked by #[diplomat::bridge]
     analyze_types: bool,
     type_parent_attrs: Attrs,
     impl_parent_attrs: Attrs,
@@ -264,22 +271,46 @@ impl ModuleBuilder {
                 }
             }
             Item::Macro(mac) => {
-                if let Some(i) = &mac.ident {
-                    let macro_rules_attr = mac.attrs.iter().find(|a| {
-                        a.path() == &syn::parse_str::<syn::Path>("diplomat::macro_rules").unwrap()
-                    });
+                if self.analyze_types {
+                    if let Some(i) = &mac.ident {
+                        let macro_rules_attr = mac.attrs.iter().find(|a| {
+                            a.path()
+                                == &syn::parse_str::<syn::Path>("diplomat::macro_rules").unwrap()
+                        });
 
-                    if macro_rules_attr.is_some() {
-                        self.mod_macros.add_item_macro(mac);
+                        if macro_rules_attr.is_some() {
+                            self.mod_macros.add_item_macro(mac);
+                        } else {
+                            println!(
+                                r#"WARNING: Found macro_rules definition "macro_rules! {i}" with no #[diplomat::macro_rules] attribute. This will not be evaluated in Diplomat bindings."#
+                            );
+                        }
                     } else {
-                        println!(
-                            r#"WARNING: Found macro_rules definition "macro_rules! {i}" with no #[diplomat::macro_rules] attribute. This will not be evaluated in Diplomat bindings."#
-                        );
+                        let items = self.mod_macros.evaluate_item_macro(mac);
+                        for i in items {
+                            self.add(&i);
+                        }
                     }
-                } else {
-                    let items = self.mod_macros.evaluate_item_macro(mac);
-                    for i in items {
-                        self.add(&i);
+                }
+            }
+            Item::Fn(f) => {
+                if self.analyze_types {
+                    let is_public = matches!(f.vis, Visibility::Public(_));
+                    let has_diplomat_attrs = f
+                        .attrs
+                        .iter()
+                        .any(|a| a.path().segments.iter().next().unwrap().ident == "diplomat");
+                    assert!(
+                        is_public || !has_diplomat_attrs,
+                        "Non-public function with diplomat attrs found: {}",
+                        f.sig.ident
+                    );
+                    if is_public {
+                        let parent_attrs = self
+                            .impl_parent_attrs
+                            .attrs_for_inheritance(AttrInheritContext::MethodFromImpl);
+                        let out = Function::from_syn(f, &parent_attrs);
+                        self.functions_by_name.insert(out.name.clone(), out);
                     }
                 }
             }
@@ -327,6 +358,12 @@ impl Module {
             }
         });
 
+        self.declared_functions.iter().for_each(|(k, f)| {
+            if mod_symbols.insert(k.clone(), ModSymbol::Function(f.clone())).is_some() {
+                panic!("Two functions were declared with the same name, this needs to be implemented (key: {k})")
+            }
+        });
+
         let path_to_self = in_path.sub_path(self.name.clone());
         self.sub_modules.iter().for_each(|m| {
             m.insert_all_types(path_to_self.clone(), out);
@@ -336,12 +373,17 @@ impl Module {
         out.insert(path_to_self, mod_symbols);
     }
 
+    /// Convert an [`ItemMod`] to a [`Module`].
+    ///
+    /// `force_analyze` is for forcibly parsing the module in the case where we know the `#[diplomat::bridge]` attribute should be present,
+    /// but proc_macro (or some other analyzer) has removed the attribute in advance.
     pub fn from_syn(input: &ItemMod, force_analyze: bool) -> Module {
         let mod_attrs: Attrs = (&*input.attrs).into();
 
         let mut mst = ModuleBuilder {
             custom_types_by_name: BTreeMap::new(),
             custom_traits_by_name: BTreeMap::new(),
+            functions_by_name: BTreeMap::new(),
             sub_modules: Vec::new(),
             imports: Vec::new(),
             analyze_types: force_analyze
@@ -370,6 +412,7 @@ impl Module {
             imports: mst.imports,
             declared_types: mst.custom_types_by_name,
             declared_traits: mst.custom_traits_by_name,
+            declared_functions: mst.functions_by_name,
             sub_modules: mst.sub_modules,
             attrs: mod_attrs,
         }
@@ -491,6 +534,11 @@ mod tests {
                             pub fn get_string(&self) -> String {
                                 unimplemented!()
                             }
+                        }
+
+                        pub fn test_function() {}
+                        pub fn other_test_function(x : i32) -> NonOpaqueStruct {
+                            unimplemented!();
                         }
                     }
                 },
