@@ -65,7 +65,7 @@ pub struct Attrs {
     pub abi_compatible: bool,
 
     /// Information on if a type declaration/impl block has custom bindings, and if so, what kind.
-    pub binding_includes: HashMap<IncludeLocation, IncludeSource>,
+    pub custom_extra_code: HashMap<IncludeLocation, IncludeSource>,
 }
 
 /// Whether the custom binding is included as a whole file or a block of code. These are mutually exclusive.
@@ -88,6 +88,91 @@ pub enum IncludeLocation {
     /// A block for adding to an initialization function. Intended for backends that build off of C/C++.
     /// Used by the Nanobind backend to override functionality for Nanobind bindings.
     InitializationBlock,
+}
+impl IncludeLocation {
+    fn pair_from_meta(
+        meta: &Meta,
+        errors: &mut ErrorStore,
+    ) -> (Option<IncludeLocation>, Option<IncludeSource>) {
+        let mut source: Option<IncludeSource> = None;
+        let mut location: Option<IncludeLocation> = None;
+        let list = meta.require_list()
+        .and_then(|l| {
+            let parser = syn::punctuated::Punctuated::<syn::ExprAssign, syn::Token![,]>::parse_separated_nonempty;
+            l.parse_args_with(parser).map_err(|e| {
+                syn::Error::new(l.span(), format!("Could not parse comma separated list: {e}"))
+            })
+        });
+        let res = list.and_then(|punc| {
+            for expr in punc {
+                let assigned: String = match expr.right.as_ref() {
+                    syn::Expr::Lit(syn::ExprLit { lit, .. })
+                        if matches!(lit, syn::Lit::Str(..)) =>
+                    {
+                        if let syn::Lit::Str(s) = lit {
+                            s.value()
+                        } else {
+                            unreachable!()
+                        }
+                    }
+                    _ => {
+                        return Err(syn::Error::new(
+                            expr.right.span(),
+                            "Expected equivalence to a file path string.",
+                        ))
+                    }
+                };
+
+                let ident = match expr.left.as_ref() {
+                    syn::Expr::Path(p) => {
+                        let ident = p.path.get_ident();
+                        if let Some(i) = ident {
+                            i
+                        } else {
+                            return Err(syn::Error::new(p.path.span(), "Expected ident."));
+                        }
+                    }
+                    _ => return Err(syn::Error::new(expr.left.span(), "Expected a path.")),
+                };
+
+                let ident_str = ident.to_string();
+
+                match ident_str.as_str() {
+                    "location" => location = IncludeLocation::from_assign(&assigned, errors),
+                    "source" => source = Some(IncludeSource::Source(assigned)),
+                    "file" => source = Some(IncludeSource::File(assigned)),
+                    _ => {
+                        return Err(syn::Error::new(
+                            ident.span(),
+                            format!("Unrecognized include ident `{ident_str}`"),
+                        ))
+                    }
+                }
+            }
+            Ok(())
+        });
+        if let Err(e) = res {
+            errors.push(LoweringError::Other(format!(
+                "Error parsing `{}`: {e}",
+                meta.to_token_stream()
+            )));
+        }
+        (location, source)
+    }
+
+    fn from_assign(assigned: &str, errors: &mut ErrorStore) -> Option<Self> {
+        match assigned {
+            "def_block" => Some(IncludeLocation::DefBlock),
+            "impl_block" => Some(IncludeLocation::ImplBlock),
+            "init_block" => Some(IncludeLocation::InitializationBlock),
+            _ => {
+                errors.push(LoweringError::Other(format!(
+                    "Include location `{assigned}` unsupported."
+                )));
+                None
+            }
+        }
+    }
 }
 
 // #region: Demo specific attributes.
@@ -418,71 +503,17 @@ impl Attrs {
                             }
                             this.abi_compatible = true;
                         }
-                        "include" => {
-                            let mut source: Option<IncludeSource> = None;
-                            let mut location: Option<IncludeLocation> = None;
-                            let list = attr.meta.require_list()
-                            .and_then(|l| {
-                                let parser = syn::punctuated::Punctuated::<syn::ExprAssign, syn::Token![,]>::parse_separated_nonempty;
-                                let punc = l.parse_args_with(parser).map_err(|e| {
-                                    syn::Error::new(l.span(), format!("Could not parse comma separated list: {e}"))
-                                })?;
-                                for expr in punc {
-                                    let assigned : String = match expr.right.as_ref() {
-                                        syn::Expr::Lit(syn::ExprLit{ lit, .. }) if matches!(lit, syn::Lit::Str(..)) => {
-                                            if let syn::Lit::Str(s) = lit {
-                                                s.value()
-                                            } else {
-                                                unreachable!()
-                                            }
-                                        },
-                                        _ => return Err(syn::Error::new(expr.right.span(), "Expected equivalence to a file path string.")),
-                                    };
-
-                                    let ident = match expr.left.as_ref() {
-                                        syn::Expr::Path(p) => {
-                                            let ident = p.path.get_ident();
-                                            if let Some(i) = ident {
-                                                i
-                                            } else {
-                                                return Err(syn::Error::new(p.path.span(), "Expected ident."));
-                                            }
-                                        },
-                                        _ => return Err(syn::Error::new(expr.left.span(), "Expected a path.")),
-                                    };
-
-                                    let ident_str = ident.to_string();
-
-                                    match ident_str.as_str() {
-                                        "source" => source = Some(IncludeSource::Source(assigned)),
-                                        "file" => source = Some(IncludeSource::File(assigned)),
-                                        "location" => location = match assigned.as_str() {
-                                            "def_block" => Some(IncludeLocation::DefBlock),
-                                            "impl_block" => Some(IncludeLocation::ImplBlock),
-                                            "init_block" => Some(IncludeLocation::InitializationBlock),
-                                            _ => {
-                                                errors.push(LoweringError::Other(format!("Include location `{assigned}` unsupported.")));
-                                                None
-                                            }
-                                        },
-                                        _ => return Err(syn::Error::new(ident.span(), format!("Unrecognized include ident `{ident_str}`")))
-                                    }
-
-
-                                }
-                                Ok(())
-                            });
-                            if let Err(e) = list {
-                                errors.push(LoweringError::Other(format!(
-                                    "Error parsing `{}`: {e}",
-                                    attr.meta.to_token_stream()
-                                )));
-                                continue;
-                            }
+                        "custom_extra_code" => {
+                            let (location, source) =
+                                IncludeLocation::pair_from_meta(&attr.meta, errors);
 
                             match (&location, &source) {
                                 (Some(l), Some(s)) => {
-                                    this.binding_includes.insert(l.clone(), s.clone());
+                                    if let Some(s) = this.custom_extra_code.get(l) {
+                                        errors.push(LoweringError::Other(format!("Found existing location-source pair: {l:?} = {s:?}. Duplicates not allowed.")));
+                                    } else {
+                                        this.custom_extra_code.insert(l.clone(), s.clone());
+                                    }
                                 }
                                 _ => {
                                     errors.push(LoweringError::Other(format!("Expected `source=`, `file=`, `location=`. Got: Source: {source:?} Location: {location:?}")));
@@ -491,7 +522,7 @@ impl Attrs {
                         }
                         _ => {
                             errors.push(LoweringError::Other(format!(
-                                "Unknown diplomat attribute {path}: expected one of: `disable, rename, namespace, constructor, stringifier, comparison, named_constructor, getter, setter, include, indexer, error`"
+                                "Unknown diplomat attribute {path}: expected one of: `disable, rename, namespace, constructor, stringifier, comparison, named_constructor, getter, setter, custom_extra_code, indexer, error`"
                             )));
                         }
                     },
@@ -596,7 +627,7 @@ impl Attrs {
             demo_attrs: _,
             generate_mocking_interface,
             abi_compatible,
-            binding_includes,
+            custom_extra_code,
         } = &self;
 
         if *disable && matches!(context, AttributeContext::EnumVariant(..)) {
@@ -980,7 +1011,7 @@ impl Attrs {
             ));
         }
 
-        if !binding_includes.is_empty() {
+        if !custom_extra_code.is_empty() {
             if !validator.attrs_supported().custom_bindings {
                 // We only validate that the language supports the bindings. We don't validate
                 // anything else, since this is an advanced feature (you have to know what you are doing).
@@ -990,7 +1021,7 @@ impl Attrs {
             }
             if !matches!(context, AttributeContext::Type(..)) {
                 errors.push(LoweringError::Other(
-                    "`include` only supported on type declarations.".into(),
+                    "`custom_extra_code` only supported on type declarations.".into(),
                 ));
             }
         }
@@ -1032,7 +1063,7 @@ impl Attrs {
             generate_mocking_interface: false,
             abi_compatible: false,
             // Not inherited
-            binding_includes: Default::default(),
+            custom_extra_code: Default::default(),
         }
     }
 }
@@ -1773,18 +1804,18 @@ mod tests {
     }
 
     #[test]
-    fn test_custom_include() {
+    fn test_custom_extra_code() {
         uitest_lowering_attr! { hir::BackendAttrSupport::all_true(),
             #[diplomat::bridge]
             mod ffi {
-                #[diplomat::attr(tests, include(source="std::string test;", location="impl_block"))]
-                #[diplomat::attr(tests, include(file="test_file.hpp", location="def_block"))]
+                #[diplomat::attr(tests, custom_extra_code(source="std::string test;", location="impl_block"))]
+                #[diplomat::attr(tests, custom_extra_code(file="test_file.hpp", location="def_block"))]
                 pub struct IncludeDef {}
 
                 impl IncludeDef {}
 
-                #[diplomat::attr(tests, include(file="testing.d.hpp", location="def_block"))]
-                #[diplomat::attr(tests, include(source="void test() {}", location="impl_block"))]
+                #[diplomat::attr(tests, custom_extra_code(file="testing.d.hpp", location="def_block"))]
+                #[diplomat::attr(tests, custom_extra_code(source="void test() {}", location="impl_block"))]
                 #[diplomat::opaque]
                 pub struct IncludeBlock();
 
@@ -1795,7 +1826,7 @@ mod tests {
     }
 
     #[test]
-    fn test_custom_include_fail() {
+    fn test_custom_extra_code_fail() {
         uitest_lowering_attr! { hir::BackendAttrSupport::all_true(),
             #[diplomat::bridge]
             mod ffi {
@@ -1804,8 +1835,8 @@ mod tests {
                 }
 
                 impl IncludeDef {
-                    #[diplomat::attr(tests, include(a="", location="unknown"))]
-                    #[diplomat::attr(tests, include(location="unknown", source="test"))]
+                    #[diplomat::attr(tests, custom_extra_code(a="", location="unknown"))]
+                    #[diplomat::attr(tests, custom_extra_code(location="unknown", source="test"))]
                     pub fn test() {
 
                     }
@@ -1816,7 +1847,7 @@ mod tests {
     }
 
     #[test]
-    fn test_custom_include_fail_unsupported() {
+    fn test_custom_extra_code_fail_unsupported() {
         uitest_lowering_attr! { hir::BackendAttrSupport::default(),
             #[diplomat::bridge]
             mod ffi {
@@ -1825,7 +1856,7 @@ mod tests {
                 }
 
                 impl IncludeDef {
-                    #[diplomat::attr(tests, include(source="", location="def_block"))]
+                    #[diplomat::attr(tests, custom_extra_code(source="", location="def_block"))]
                     pub fn test() {
 
                     }

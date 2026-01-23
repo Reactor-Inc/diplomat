@@ -2,14 +2,9 @@ mod formatter;
 pub(crate) mod gen;
 mod root_module;
 
-use std::{
-    collections::{BTreeMap, BTreeSet},
-    fmt::Write,
-};
+use std::collections::{BTreeMap, BTreeSet};
 
-use crate::{
-    cpp::Header, nanobind::gen::MethodInfo, read_custom_binding, Config, ErrorStore, FileMap,
-};
+use crate::{cpp::Header, nanobind::gen::MethodInfo, Config, ErrorStore, FileMap};
 use askama::Template;
 use diplomat_core::hir::{self, BackendAttrSupport, DocsUrlGenerator};
 use formatter::PyFormatter;
@@ -125,6 +120,7 @@ pub(crate) fn run<'cx>(
         let mut context = ItemGenContext {
             formatter: &formatter,
             errors: &errors,
+            config: &conf,
             cpp: crate::cpp::ItemGenContext {
                 c: crate::c::ItemGenContext {
                     tcx,
@@ -134,7 +130,7 @@ pub(crate) fn run<'cx>(
                     impl_header_path: &cpp_impl_path,
                     is_for_cpp: false,
                 },
-                config: &conf.cpp_config,
+                config: &conf,
                 formatter: &formatter.cxx,
                 errors: &errors,
                 impl_header: &mut crate::cpp::Header::default(),
@@ -180,14 +176,6 @@ pub(crate) fn run<'cx>(
         }
         drop(guard);
 
-        let binding_info = &ty.attrs().binding_includes;
-
-        if let Some(s) = binding_info.get(&hir::IncludeLocation::InitializationBlock) {
-            if let Ok(s) = read_custom_binding(s, &conf, &errors) {
-                writeln!(body, "\n{}", s).expect("Could not write to body.");
-            }
-        }
-
         let binding_impl = Binding {
             includes: context.cpp.impl_header.includes.clone(),
             lib_name: lib_name.clone(),
@@ -203,6 +191,7 @@ pub(crate) fn run<'cx>(
     let mut ty_context = ItemGenContext {
         formatter: &formatter,
         errors: &errors,
+        config: &conf,
         cpp: crate::cpp::ItemGenContext {
             c: crate::c::ItemGenContext {
                 tcx,
@@ -212,7 +201,7 @@ pub(crate) fn run<'cx>(
                 decl_header_path: "",
                 impl_header_path: "",
             },
-            config: &conf.cpp_config,
+            config: &conf,
             errors: &errors,
             formatter: &formatter.cxx,
             impl_header: &mut Header::default(),
@@ -398,6 +387,7 @@ mod test {
         let mut context = crate::nanobind::ItemGenContext {
             formatter: &formatter,
             errors: &errors,
+            config: &config,
             cpp: crate::cpp::ItemGenContext {
                 c: crate::c::ItemGenContext {
                     tcx: &tcx,
@@ -409,7 +399,7 @@ mod test {
                 },
                 formatter: &formatter.cxx,
                 errors: &errors,
-                config: &config.cpp_config,
+                config: &config,
                 impl_header: &mut crate::cpp::Header::default(),
                 decl_header: &mut crate::cpp::Header::default(),
                 generating_struct_fields: false,
@@ -476,6 +466,7 @@ mod test {
         let mut context = crate::nanobind::ItemGenContext {
             formatter: &formatter,
             errors: &errors,
+            config: &config,
             cpp: crate::cpp::ItemGenContext {
                 c: crate::c::ItemGenContext {
                     tcx: &tcx,
@@ -486,7 +477,7 @@ mod test {
                     impl_header_path: &impl_file_path,
                 },
                 formatter: &formatter.cxx,
-                config: &config.cpp_config,
+                config: &config,
                 errors: &errors,
                 impl_header: &mut crate::cpp::Header::default(),
                 decl_header: &mut crate::cpp::Header::default(),
@@ -553,6 +544,7 @@ mod test {
         let mut context = crate::nanobind::ItemGenContext {
             formatter: &formatter,
             errors: &errors,
+            config: &config,
             cpp: crate::cpp::ItemGenContext {
                 c: crate::c::ItemGenContext {
                     tcx: &tcx,
@@ -564,7 +556,7 @@ mod test {
                 },
                 formatter: &formatter.cxx,
                 errors: &errors,
-                config: &config.cpp_config,
+                config: &config,
                 impl_header: &mut crate::cpp::Header::default(),
                 decl_header: &mut crate::cpp::Header::default(),
                 generating_struct_fields: false,
