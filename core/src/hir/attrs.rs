@@ -83,11 +83,18 @@ pub enum IncludeSource {
 pub enum IncludeLocation {
     /// An extension to the definition of the class (i.e., in C++, the .d.hpp file)
     DefBlock,
+    /// An extension to the definition of the class BEFORE the class is defined.
+    PreDefBlock,
+    /// An extension to the definition of the class AFTER the class is defined.
+    PostDefBlock,
     /// An extension to the implementation of the class (i.e., in C++, the .hpp file)
     ImplBlock,
     /// A block for adding to an initialization function. Intended for backends that build off of C/C++.
     /// Used by the Nanobind backend to override functionality for Nanobind bindings.
     InitializationBlock,
+    /// The block at the start of an initialization function.
+    /// There is no post initialization block since the InitializationBlock is already after all initializations before.
+    PreInitializationBlock,
 }
 impl IncludeLocation {
     fn pair_from_meta(
@@ -162,8 +169,11 @@ impl IncludeLocation {
 
     fn from_assign(assigned: &str, errors: &mut ErrorStore) -> Option<Self> {
         match assigned {
+            "pre_def_block" => Some(IncludeLocation::PreDefBlock),
             "def_block" => Some(IncludeLocation::DefBlock),
+            "post_def_block" => Some(IncludeLocation::PostDefBlock),
             "impl_block" => Some(IncludeLocation::ImplBlock),
+            "pre_init_block" => Some(IncludeLocation::PreInitializationBlock),
             "init_block" => Some(IncludeLocation::InitializationBlock),
             _ => {
                 errors.push(LoweringError::Other(format!(
@@ -1162,6 +1172,9 @@ pub struct BackendAttrSupport {
     pub free_functions: bool,
     /// Whether the language supports being able to include custom bindings.
     pub custom_bindings: bool,
+
+    /// Whether the language supports taking in Rust-allocated slices from the given backend.
+    pub owned_slices: bool,
 }
 
 impl BackendAttrSupport {
@@ -1199,6 +1212,7 @@ impl BackendAttrSupport {
             struct_refs: true,
             free_functions: true,
             custom_bindings: true,
+            owned_slices: true,
         }
     }
 
@@ -1232,6 +1246,7 @@ impl BackendAttrSupport {
             "struct_refs" => Some(self.struct_refs),
             "free_functions" => Some(self.free_functions),
             "custom_bindings" => Some(self.custom_bindings),
+            "owned_slices" => Some(self.owned_slices),
             _ => None,
         }
     }
@@ -1378,6 +1393,7 @@ impl AttributeValidator for BasicAttributeValidator {
                 struct_refs,
                 free_functions,
                 custom_bindings,
+                owned_slices,
             } = self.support;
             match value {
                 "namespacing" => namespacing,
@@ -1411,6 +1427,7 @@ impl AttributeValidator for BasicAttributeValidator {
                 "struct_refs" => struct_refs,
                 "free_functions" => free_functions,
                 "custom_bindings" => custom_bindings,
+                "owned_slices" => owned_slices,
                 _ => {
                     return Err(LoweringError::Other(format!(
                         "Unknown supports = value found: {value}"
