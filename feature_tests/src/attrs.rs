@@ -55,6 +55,12 @@ pub mod ffi {
     #[diplomat::attr(kotlin, generate_mocking_interface)]
     #[diplomat::attr(not(kotlin), rename = "AttrOpaque1Renamed")]
     /// Some example docs
+    #[diplomat::docs(any(nanobind, cpp))]
+    /// Some Nanobind/C++ example docs
+    #[diplomat::docs(js)]
+    /// Some JS example docs
+    #[diplomat::docs(*)]
+    /// Back to all docs
     pub struct AttrOpaque1;
 
     impl AttrOpaque1 {
@@ -245,12 +251,15 @@ pub mod ffi {
     }
 
     impl OpaqueArithmetic {
-        pub fn make(x: i32, y: i32) -> Box<Self> {
+        pub fn make(x: i32, #[diplomat::attr(auto, default_value = 12)] y: i32) -> Box<Self> {
             Box::new(Self { x, y })
         }
 
         #[diplomat::attr(supports=method_overloading, rename="make")]
-        pub fn make_overload(x: f32, y: f32) -> Box<Self> {
+        pub fn make_overload(
+            x: f32,
+            #[diplomat::attr(auto, default_value = 14.48)] y: f32,
+        ) -> Box<Self> {
             Box::new(Self {
                 x: (x as i32) + 2,
                 y: y as i32,
@@ -407,13 +416,15 @@ pub mod ffi {
     } f64, pub, const IT:usize = 0;}
 
     #[diplomat::attr(not(supports = free_functions), disable)]
+    #[diplomat::attr(cpp, custom_extra_code(source = "//Test", location = "pre_impl_block"))]
+    #[diplomat::attr(cpp, custom_extra_code(source = "//End Test", location = "impl_block"))]
     pub fn free_func_test(x: i32) -> i32 {
         x + 5
     }
 
     #[diplomat::attr(not(supports = free_functions), disable)]
     #[diplomat::attr(auto, namespace = "nested::ns")]
-    pub fn nested_ns_fn(x: bool) -> bool {
+    pub fn nested_ns_fn(#[diplomat::attr(auto, default_value = true)] x: bool) -> bool {
         !x
     }
 
@@ -482,6 +493,10 @@ pub mod ffi {
         )
     )]
     #[diplomat::attr(
+        any(nanobind, cpp),
+        custom_extra_code(source = "//Test!", location = "pre_impl_block")
+    )]
+    #[diplomat::attr(
         nanobind,
         custom_extra_code(
             source = r#"opaque.def("special_function", &somelib::ns::RenamedBlockOverride::special_function);"#,
@@ -497,4 +512,141 @@ pub mod ffi {
     // C++ will not generate this, since it has all features disabled by default (see lib.rs)
     #[diplomat::attr(not(feature=some_feature), disable)]
     pub struct FeatureTest();
+
+    #[diplomat::attr(not(nanobind), disable)]
+    #[diplomat::opaque]
+    /// Tests for https://github.com/rust-diplomat/diplomat/issues/1050.
+    /// C++ generates unique_ptrs for Opaque ZSTs, and Nanobind
+    /// expects every unique_ptr it converts to wrap a unique pointer type. It errors otherwise.
+    /// This is not the case, as in Rust pointers to ZSTs are always the same address.
+    pub struct OpaqueZST;
+
+    impl OpaqueZST {
+        #[diplomat::attr(auto, constructor)]
+        pub fn ctor() -> Box<Self> {
+            Box::new(Self)
+        }
+
+        pub fn make() -> Box<Self> {
+            Box::new(Self)
+        }
+
+        #[diplomat::attr(auto, getter)]
+        pub fn out_string(w: &mut DiplomatWrite) {
+            write!(w, "Test!").expect("Could not write");
+        }
+
+        pub fn member(&self) -> Box<Self> {
+            Box::new(Self)
+        }
+
+        pub fn mut_member(&mut self) -> Box<Self> {
+            Box::new(Self)
+        }
+
+        #[diplomat::attr(auto, add)]
+        pub fn add(&self, _o: &Self) -> Box<Self> {
+            Box::new(OpaqueZST)
+        }
+
+        #[diplomat::attr(auto, sub)]
+        pub fn sub(&self, _o: &Self) -> Box<Self> {
+            Box::new(Self)
+        }
+
+        #[diplomat::attr(auto, mul)]
+        pub fn mul(&self, _o: &Self) -> Box<Self> {
+            Box::new(Self)
+        }
+
+        #[diplomat::attr(auto, div)]
+        pub fn div(&self, _o: &Self) -> Box<Self> {
+            Box::new(Self)
+        }
+
+        pub fn success_zst(return_success: bool) -> Result<Box<Self>, ()> {
+            if return_success {
+                Ok(Box::new(Self))
+            } else {
+                Err(())
+            }
+        }
+
+        pub fn fail_zst(return_success: bool) -> Result<(), Box<Self>> {
+            if return_success {
+                Ok(())
+            } else {
+                Err(Box::new(Self))
+            }
+        }
+
+        pub fn success_fail_zst(return_success: bool) -> Result<Box<Self>, Box<Self>> {
+            if return_success {
+                Ok(Box::new(Self))
+            } else {
+                Err(Box::new(Self))
+            }
+        }
+
+        pub fn optional_zst(is_some: bool) -> Option<Box<Self>> {
+            if is_some {
+                Some(Box::new(Self))
+            } else {
+                None
+            }
+        }
+
+        #[diplomat::attr(auto, getter)]
+        pub fn static_getter() -> Box<Self> {
+            Box::new(Self)
+        }
+
+        #[diplomat::attr(auto, setter = "static_getter")]
+        pub fn static_setter(_a: &Self) {}
+
+        #[diplomat::attr(auto, getter)]
+        pub fn getter(&self) -> Box<Self> {
+            Box::new(Self)
+        }
+
+        #[diplomat::attr(auto, setter = "getter")]
+        pub fn setter(&self, _a: &Self) {}
+
+        #[diplomat::attr(auto, iterable)]
+        pub fn iter(&self) -> Box<OpaqueZSTIterator> {
+            Box::new(OpaqueZSTIterator)
+        }
+
+        #[diplomat::attr(auto, indexer)]
+        pub fn indexer(&self, _idx: usize) -> Box<Self> {
+            Box::new(Self)
+        }
+    }
+
+    #[diplomat::attr(not(nanobind), disable)]
+    #[diplomat::opaque]
+    /// Tests for https://github.com/rust-diplomat/diplomat/issues/1050.
+    pub struct OpaqueZSTIterator;
+
+    impl OpaqueZSTIterator {
+        #[diplomat::attr(auto, constructor)]
+        pub fn ctor() -> Box<Self> {
+            Box::new(Self)
+        }
+
+        #[diplomat::attr(auto, iterator)]
+        pub fn next(&self) -> Option<Box<Self>> {
+            Some(Box::new(Self))
+        }
+
+        #[diplomat::attr(auto, indexer)]
+        pub fn nullable_indexer(&self, _idx: usize) -> Option<Box<Self>> {
+            Some(Box::new(Self))
+        }
+
+        #[diplomat::attr(auto, stringifier)]
+        pub fn stringify(&self, _w: &mut DiplomatWrite) -> Result<(), Box<OpaqueZST>> {
+            Err(Box::new(OpaqueZST))
+        }
+    }
 }

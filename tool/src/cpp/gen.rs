@@ -25,6 +25,8 @@ use crate::filters;
 pub struct NamedType<'a> {
     var_name: Cow<'a, str>,
     type_name: Cow<'a, str>,
+    /// Default value (for method params, but could eventually be for structs).
+    default_value: Option<Cow<'a, str>>,
 }
 
 /// We generate a pair of methods for writeables, one which returns a std::string
@@ -71,6 +73,7 @@ pub struct MethodInfo<'a> {
     writeable_info: Option<MethodWriteableInfo<'a>>,
     docs: String,
     deprecated: Option<&'a str>,
+    extra_impl_code: ExtraCode,
 }
 
 /// An expression with a corresponding variable name, such as a struct field or a function parameter.
@@ -136,6 +139,30 @@ impl<'ccx, 'tcx: 'ccx> ItemGenContext<'ccx, 'tcx, '_> {
             pre: pre_extra_def_code,
             post: post_extra_def_code,
             inner: extra_def_code,
+        }
+    }
+
+    fn impl_extra_code_from_attrs(
+        &self,
+        custom_extra_code: &HashMap<IncludeLocation, IncludeSource>,
+    ) -> ExtraCode {
+        let extra_impl_code = if let Some(s) = custom_extra_code.get(&IncludeLocation::ImplBlock) {
+            read_custom_binding(s, self.config, self.errors).unwrap_or_default()
+        } else {
+            Default::default()
+        };
+
+        let pre_extra_impl_code =
+            if let Some(s) = custom_extra_code.get(&IncludeLocation::PreImplBlock) {
+                read_custom_binding(s, self.config, self.errors).unwrap_or_default()
+            } else {
+                Default::default()
+            };
+
+        ExtraCode {
+            pre: pre_extra_impl_code,
+            post: Default::default(),
+            inner: extra_impl_code,
         }
     }
 
@@ -226,16 +253,6 @@ impl<'ccx, 'tcx: 'ccx> ItemGenContext<'ccx, 'tcx, '_> {
         .render_into(self.decl_header)
         .unwrap();
 
-        let extra_impl_code = if let Some(s) = ty
-            .attrs
-            .custom_extra_code
-            .get(&hir::IncludeLocation::ImplBlock)
-        {
-            read_custom_binding(s, self.config, self.errors).unwrap_or_default()
-        } else {
-            Default::default()
-        };
-
         #[derive(Template)]
         #[template(path = "cpp/enum_impl.h.jinja", escape = "none")]
         struct ImplTemplate<'a> {
@@ -246,7 +263,7 @@ impl<'ccx, 'tcx: 'ccx> ItemGenContext<'ccx, 'tcx, '_> {
             methods: &'a [MethodInfo<'a>],
             namespace: Option<&'a str>,
             c_header: C2Header,
-            extra_impl_code: String,
+            extra_impl_code: ExtraCode,
         }
 
         ImplTemplate {
@@ -257,7 +274,7 @@ impl<'ccx, 'tcx: 'ccx> ItemGenContext<'ccx, 'tcx, '_> {
             methods: methods.as_slice(),
             namespace: ty.attrs.namespace.as_deref(),
             c_header: c_impl_header,
-            extra_impl_code,
+            extra_impl_code: self.impl_extra_code_from_attrs(&ty.attrs.custom_extra_code),
         }
         .render_into(self.impl_header)
         .unwrap();
@@ -315,16 +332,6 @@ impl<'ccx, 'tcx: 'ccx> ItemGenContext<'ccx, 'tcx, '_> {
         .render_into(self.decl_header)
         .unwrap();
 
-        let extra_impl_code = if let Some(s) = ty
-            .attrs
-            .custom_extra_code
-            .get(&hir::IncludeLocation::ImplBlock)
-        {
-            read_custom_binding(s, self.config, self.errors).unwrap_or_default()
-        } else {
-            Default::default()
-        };
-
         #[derive(Template)]
         #[template(path = "cpp/opaque_impl.h.jinja", escape = "none")]
         struct ImplTemplate<'a> {
@@ -336,7 +343,7 @@ impl<'ccx, 'tcx: 'ccx> ItemGenContext<'ccx, 'tcx, '_> {
             methods: &'a [MethodInfo<'a>],
             namespace: Option<&'a str>,
             c_header: C2Header,
-            extra_impl_code: String,
+            extra_impl_code: ExtraCode,
         }
 
         ImplTemplate {
@@ -348,7 +355,7 @@ impl<'ccx, 'tcx: 'ccx> ItemGenContext<'ccx, 'tcx, '_> {
             methods: methods.as_slice(),
             namespace: ty.attrs.namespace.as_deref(),
             c_header: c_impl_header,
-            extra_impl_code,
+            extra_impl_code: self.impl_extra_code_from_attrs(&ty.attrs.custom_extra_code),
         }
         .render_into(self.impl_header)
         .unwrap();
@@ -429,16 +436,6 @@ impl<'ccx, 'tcx: 'ccx> ItemGenContext<'ccx, 'tcx, '_> {
         .render_into(self.decl_header)
         .unwrap();
 
-        let extra_impl_code = if let Some(s) = def
-            .attrs
-            .custom_extra_code
-            .get(&hir::IncludeLocation::ImplBlock)
-        {
-            read_custom_binding(s, self.config, self.errors).unwrap_or_default()
-        } else {
-            Default::default()
-        };
-
         #[derive(Template)]
         #[template(path = "cpp/struct_impl.h.jinja", escape = "none")]
         struct ImplTemplate<'a> {
@@ -451,7 +448,7 @@ impl<'ccx, 'tcx: 'ccx> ItemGenContext<'ccx, 'tcx, '_> {
             methods: &'a [MethodInfo<'a>],
             namespace: Option<&'a str>,
             c_header: C2Header,
-            extra_impl_code: String,
+            extra_impl_code: ExtraCode,
         }
 
         ImplTemplate {
@@ -464,7 +461,7 @@ impl<'ccx, 'tcx: 'ccx> ItemGenContext<'ccx, 'tcx, '_> {
             methods: methods.as_slice(),
             namespace: def.attrs.namespace.as_deref(),
             c_header: c_impl_header,
-            extra_impl_code,
+            extra_impl_code: self.impl_extra_code_from_attrs(&def.attrs.custom_extra_code),
         }
         .render_into(self.impl_header)
         .unwrap();
@@ -537,7 +534,17 @@ impl<'ccx, 'tcx: 'ccx> ItemGenContext<'ccx, 'tcx, '_> {
         };
 
         for param in method.params.iter() {
-            let decls = self.gen_ty_decl(&param.ty, param.name.as_str());
+            let mut decls = self.gen_ty_decl(&param.ty, param.name.as_str());
+            if let Some(d) = &param.attrs.default_value {
+                let s = match d {
+                    hir::DefaultArgValue::Bool(b) => b.to_string(),
+                    hir::DefaultArgValue::Char(c) => format!(r#"{{ "{}", {} }}"#, c, c.len_utf8()),
+                    hir::DefaultArgValue::Integer(i) => i.to_string(),
+                    hir::DefaultArgValue::Float(f) => f.to_string(),
+                    _ => panic!("Default arg value {d:?} not implemented."),
+                };
+                decls.default_value = Some(s.into());
+            }
             let param_name = decls.var_name.clone();
             param_decls.push(decls);
             if matches!(
@@ -697,6 +704,7 @@ impl<'ccx, 'tcx: 'ccx> ItemGenContext<'ccx, 'tcx, '_> {
             writeable_info,
             docs: self.formatter.fmt_docs(&method.docs, &method.attrs),
             deprecated: method.attrs.deprecated.as_deref(),
+            extra_impl_code: self.impl_extra_code_from_attrs(&method.attrs.custom_extra_code),
         })
     }
 
@@ -715,6 +723,7 @@ impl<'ccx, 'tcx: 'ccx> ItemGenContext<'ccx, 'tcx, '_> {
         NamedType {
             var_name,
             type_name,
+            default_value: None,
         }
     }
 
