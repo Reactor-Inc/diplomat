@@ -1,6 +1,6 @@
 #[diplomat::bridge]
 #[diplomat::abi_rename = "namespace_{0}"]
-#[diplomat::attr(not(any(c, kotlin)), rename = "Renamed{0}")]
+#[diplomat::attr(not(c), rename = "Renamed{0}")]
 #[diplomat::attr(auto, namespace = "ns")]
 pub mod ffi {
     #[diplomat::macro_rules]
@@ -53,7 +53,7 @@ pub mod ffi {
     #[diplomat::opaque]
     // Attr for generating mocking interface in kotlin backend to enable JVM test fakes.
     #[diplomat::attr(kotlin, generate_mocking_interface)]
-    #[diplomat::attr(not(kotlin), rename = "AttrOpaque1Renamed")]
+    #[diplomat::attr(*, rename = "AttrOpaque1Renamed")]
     /// Some example docs
     #[diplomat::docs(any(nanobind, cpp))]
     /// Some Nanobind/C++ example docs
@@ -64,6 +64,12 @@ pub mod ffi {
     pub struct AttrOpaque1;
 
     impl AttrOpaque1 {
+        #[diplomat::cfg(supports=method_overloading)]
+        #[diplomat::attr(auto, constructor)]
+        pub fn new_overload(_i: i32) -> Box<AttrOpaque1> {
+            Box::new(AttrOpaque1)
+        }
+
         #[diplomat::attr(not(kotlin), rename = "totally_not_{0}")]
         #[diplomat::attr(auto, constructor)]
         /// More example docs
@@ -114,7 +120,7 @@ pub mod ffi {
 
     #[diplomat::opaque]
     #[diplomat::attr(auto, namespace = "")]
-    #[diplomat::attr(not(kotlin), rename = "Unnamespaced")]
+    #[diplomat::attr(*, rename = "Unnamespaced")]
     pub struct Unnamespaced;
 
     impl Unnamespaced {
@@ -185,9 +191,26 @@ pub mod ffi {
     }
 
     impl MyIndexer {
+        #[diplomat::attr(auto, constructor)]
+        pub fn new(v: DiplomatSlice<DiplomatStrSlice>) -> Box<Self> {
+            let boxed: &[DiplomatStrSlice] = v.into();
+            let new_vec = boxed
+                .iter()
+                .map(|sl| String::from_utf8(sl.to_vec()).unwrap())
+                .collect::<Vec<_>>();
+            Box::new(Self(new_vec))
+        }
+
         #[diplomat::attr(auto, indexer)]
         pub fn get<'a>(&'a self, i: usize) -> Option<&'a DiplomatStr> {
             self.0.get(i).as_ref().map(|string| string.as_bytes())
+        }
+
+        #[diplomat::cfg(all(supports=method_overloading, not(kotlin)))]
+        #[diplomat::attr(auto, indexer)]
+        pub fn get_str<'a>(&'a self, s: &DiplomatStr) -> Option<&'a DiplomatStr> {
+            let st = String::from_utf8(s.to_vec()).unwrap();
+            self.0.iter().find(|i| **i == st).map(|s| s.as_bytes())
         }
     }
 
