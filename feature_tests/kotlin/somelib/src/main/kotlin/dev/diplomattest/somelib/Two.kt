@@ -16,17 +16,27 @@ class Two internal constructor (
     internal val selfEdges: List<Any>,
     internal val aEdges: List<Any?>,
     internal val bEdges: List<Any?>,
+    internal var owned: Boolean,
 )  {
 
-    internal class TwoCleaner(val handle: Pointer, val lib: TwoLib) : Runnable {
+    init {
+        if (this.owned) {
+            this.registerCleaner()
+        }
+    }
+
+    private class TwoCleaner(val handle: Pointer, val lib: TwoLib) : Runnable {
         override fun run() {
             lib.Two_destroy(handle)
         }
     }
+    private fun registerCleaner() {
+        CLEANER.register(this, Two.TwoCleaner(handle, Two.lib));
+    }
 
     companion object {
         internal val libClass: Class<TwoLib> = TwoLib::class.java
-        internal val lib: TwoLib = Native.load("somelib", libClass)
+        internal val lib: TwoLib = Native.load("diplomat_feature_tests", libClass)
     }
 
 }

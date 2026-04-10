@@ -24,6 +24,7 @@ pub struct TypeContext {
     opaques: Vec<OpaqueDef>,
     enums: Vec<EnumDef>,
     traits: Vec<TraitDef>,
+    functions: Vec<hir::Method>,
 }
 
 /// Additional features/config to support while lowering
@@ -54,6 +55,10 @@ pub struct EnumId(usize);
 #[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct TraitId(usize);
 
+/// Key used to index into a [`TypeContext`] representing a function.
+#[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+pub struct FunctionId(usize);
+
 #[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[non_exhaustive]
 pub enum TypeId {
@@ -68,6 +73,7 @@ pub enum TypeId {
 pub enum SymbolId {
     TypeId(TypeId),
     TraitId(TraitId),
+    FunctionId(FunctionId),
 }
 
 enum Param<'a> {
@@ -116,6 +122,15 @@ impl TypeContext {
             .iter()
             .enumerate()
             .map(|(i, trt)| (TraitId(i), trt))
+    }
+
+    pub fn all_free_functions<'tcx>(
+        &'tcx self,
+    ) -> impl Iterator<Item = (FunctionId, &'tcx hir::Method)> {
+        self.functions
+            .iter()
+            .enumerate()
+            .map(|(i, f)| (FunctionId(i), f))
     }
 
     pub fn out_structs(&self) -> &[OutStructDef] {
@@ -179,16 +194,21 @@ impl TypeContext {
         self.traits.index(id.0)
     }
 
+    pub fn resolve_function(&self, id: FunctionId) -> &hir::Method {
+        self.functions.index(id.0)
+    }
+
     /// Resolve and format a named type for use in diagnostics
     /// (don't apply rename rules and such)
-    pub fn fmt_type_name_diagnostics(&self, id: TypeId) -> Cow<str> {
+    pub fn fmt_type_name_diagnostics(&self, id: TypeId) -> Cow<'_, str> {
         self.resolve_type(id).name().as_str().into()
     }
 
-    pub fn fmt_symbol_name_diagnostics(&self, id: SymbolId) -> Cow<str> {
+    pub fn fmt_symbol_name_diagnostics(&self, id: SymbolId) -> Cow<'_, str> {
         match id {
             SymbolId::TypeId(id) => self.fmt_type_name_diagnostics(id),
             SymbolId::TraitId(id) => self.resolve_trait(id).name.as_str().into(),
+            SymbolId::FunctionId(id) => self.resolve_function(id).name.as_str().into(),
         }
     }
 
@@ -197,8 +217,9 @@ impl TypeContext {
         s: &'ast syn::File,
         cfg: LoweringConfig,
         attr_validator: impl AttributeValidator + 'static,
+        include_info: Option<ast::ModuleIncludeInfo<'ast>>,
     ) -> Result<Self, Vec<ErrorAndContext>> {
-        let types = ast::File::from(s).all_types();
+        let types = ast::File::from_syn(s, include_info).all_types();
         let (mut ctx, hir) = Self::from_ast_without_validation(&types, cfg, attr_validator)?;
         ctx.errors.set_item("(validation)");
         hir.validate(&mut ctx.errors);
@@ -219,6 +240,7 @@ impl TypeContext {
         let mut ast_opaques = SmallVec::<[_; 16]>::new();
         let mut ast_enums = SmallVec::<[_; 16]>::new();
         let mut ast_traits = SmallVec::<[_; 16]>::new();
+        let mut ast_functions = SmallVec::<[_; 16]>::new();
 
         let mut errors = ErrorStore::default();
 
@@ -243,17 +265,11 @@ impl TypeContext {
                 match sym {
                     ast::ModSymbol::CustomType(custom_type) => match custom_type {
                         ast::CustomType::Struct(strct) => {
-                            let id = if strct.output_only {
-                                TypeId::OutStruct(OutStructId(ast_out_structs.len()))
-                            } else {
-                                TypeId::Struct(StructId(ast_structs.len()))
-                            };
                             let item = ItemAndInfo {
                                 item: strct,
                                 in_path: path,
                                 ty_parent_attrs: ty_attrs.clone(),
                                 method_parent_attrs: method_attrs.clone(),
-                                id: id.into(),
                             };
                             if strct.output_only {
                                 ast_out_structs.push(item);
@@ -267,7 +283,6 @@ impl TypeContext {
                                 in_path: path,
                                 ty_parent_attrs: ty_attrs.clone(),
                                 method_parent_attrs: method_attrs.clone(),
-                                id: TypeId::Opaque(OpaqueId(ast_opaques.len())).into(),
                             };
                             ast_opaques.push(item)
                         }
@@ -277,7 +292,6 @@ impl TypeContext {
                                 in_path: path,
                                 ty_parent_attrs: ty_attrs.clone(),
                                 method_parent_attrs: method_attrs.clone(),
-                                id: TypeId::Enum(EnumId(ast_enums.len())).into(),
                             };
                             ast_enums.push(item)
                         }
@@ -288,9 +302,17 @@ impl TypeContext {
                             in_path: path,
                             ty_parent_attrs: ty_attrs.clone(),
                             method_parent_attrs: method_attrs.clone(),
-                            id: TraitId(ast_traits.len()).into(),
                         };
                         ast_traits.push(item)
+                    }
+                    ast::ModSymbol::Function(f) => {
+                        let item = ItemAndInfo {
+                            item: f,
+                            in_path: path,
+                            ty_parent_attrs: ty_attrs.clone(),
+                            method_parent_attrs: method_attrs.clone(),
+                        };
+                        ast_functions.push(item)
                     }
                     _ => {}
                 }
@@ -319,15 +341,17 @@ impl TypeContext {
         let opaques = ctx.lower_all_opaques(ast_opaques.into_iter());
         let enums = ctx.lower_all_enums(ast_enums.into_iter());
         let traits = ctx.lower_all_traits(ast_traits.into_iter()).unwrap();
+        let functions = ctx.lower_all_functions(ast_functions.into_iter());
 
-        match (out_structs, structs, opaques, enums) {
-            (Ok(out_structs), Ok(structs), Ok(opaques), Ok(enums)) => {
+        match (out_structs, structs, opaques, enums, functions) {
+            (Ok(out_structs), Ok(structs), Ok(opaques), Ok(enums), Ok(functions)) => {
                 let res = Self {
                     out_structs,
                     structs,
                     opaques,
                     enums,
                     traits,
+                    functions,
                 };
 
                 if !ctx.errors.is_empty() {
@@ -716,6 +740,36 @@ impl From<TraitId> for SymbolId {
     }
 }
 
+impl From<FunctionId> for SymbolId {
+    fn from(x: FunctionId) -> Self {
+        SymbolId::FunctionId(x)
+    }
+}
+
+impl From<StructId> for SymbolId {
+    fn from(x: StructId) -> Self {
+        SymbolId::TypeId(x.into())
+    }
+}
+
+impl From<OutStructId> for SymbolId {
+    fn from(x: OutStructId) -> Self {
+        SymbolId::TypeId(x.into())
+    }
+}
+
+impl From<OpaqueId> for SymbolId {
+    fn from(x: OpaqueId) -> Self {
+        SymbolId::TypeId(x.into())
+    }
+}
+
+impl From<EnumId> for SymbolId {
+    fn from(x: EnumId) -> Self {
+        SymbolId::TypeId(x.into())
+    }
+}
+
 impl TryInto<TypeId> for SymbolId {
     type Error = ();
     fn try_into(self) -> Result<TypeId, Self::Error> {
@@ -750,7 +804,8 @@ mod tests {
             let mut attr_validator = hir::BasicAttributeValidator::new("tests");
             attr_validator.support.option = true;
             attr_validator.support.abi_compatibles = true;
-            match hir::TypeContext::from_syn(&parsed, Default::default(), attr_validator) {
+            attr_validator.support.free_functions = true;
+            match hir::TypeContext::from_syn(&parsed, Default::default(), attr_validator, None) {
                 Ok(_context) => (),
                 Err(e) => {
                     for (ctx, err) in e {
@@ -839,6 +894,9 @@ mod tests {
                     pub fn return_opaque_owned(&self) -> OtherOpaque {}
                     pub fn use_out_as_in(&self, out: OutStruct) {}
                 }
+
+                pub fn free_function(foo : &Opaque) {}
+                pub fn other_free_function() -> Box<Opaque> {}
 
             }
         }
@@ -1169,7 +1227,7 @@ mod tests {
         let mut attr_validator = hir::BasicAttributeValidator::new("tests");
         attr_validator.support.struct_refs = true;
         attr_validator.support.abi_compatibles = true;
-        match hir::TypeContext::from_syn(&parsed, Default::default(), attr_validator) {
+        match hir::TypeContext::from_syn(&parsed, Default::default(), attr_validator, None) {
             Ok(_context) => (),
             Err(e) => {
                 for (ctx, err) in e {
@@ -1203,7 +1261,7 @@ mod tests {
         let mut attr_validator = hir::BasicAttributeValidator::new("tests");
         attr_validator.support.abi_compatibles = true;
         attr_validator.support.struct_refs = true;
-        match hir::TypeContext::from_syn(&parsed, Default::default(), attr_validator) {
+        match hir::TypeContext::from_syn(&parsed, Default::default(), attr_validator, None) {
             Ok(_context) => (),
             Err(e) => {
                 for (ctx, err) in e {
@@ -1239,7 +1297,7 @@ mod tests {
         let mut attr_validator = hir::BasicAttributeValidator::new("tests");
         attr_validator.support.abi_compatibles = true;
         attr_validator.support.struct_refs = true;
-        match hir::TypeContext::from_syn(&parsed, Default::default(), attr_validator) {
+        match hir::TypeContext::from_syn(&parsed, Default::default(), attr_validator, None) {
             Ok(_context) => (),
             Err(e) => {
                 for (ctx, err) in e {
@@ -1271,7 +1329,7 @@ mod tests {
         attr_validator.support.abi_compatibles = true;
         attr_validator.support.struct_refs = true;
         attr_validator.support.callbacks = true;
-        match hir::TypeContext::from_syn(&parsed, Default::default(), attr_validator) {
+        match hir::TypeContext::from_syn(&parsed, Default::default(), attr_validator, None) {
             Ok(_context) => (),
             Err(e) => {
                 for (ctx, err) in e {
@@ -1315,7 +1373,7 @@ mod tests {
         let config = super::LoweringConfig {
             unsafe_references_in_callbacks: true,
         };
-        match hir::TypeContext::from_syn(&parsed, config, attr_validator) {
+        match hir::TypeContext::from_syn(&parsed, config, attr_validator, None) {
             Ok(_context) => (),
             Err(e) => {
                 for (ctx, err) in e {
@@ -1324,5 +1382,29 @@ mod tests {
             }
         };
         insta::with_settings!({}, { insta::assert_snapshot!(output) });
+    }
+
+    #[test]
+    fn test_unsupported_mut_slice() {
+        uitest_lowering! {
+            #[diplomat::bridge]
+            mod ffi {
+                #[diplomat::attr(auto, abi_compatible)]
+                pub struct Foo {
+                    x : f32,
+                    y : f32,
+                }
+
+                impl Foo {
+                    pub fn takes_slice<'a>(a : &'a mut [f32], b : &'a mut [Foo] ) -> &'a mut [f32] {
+                        todo!()
+                    }
+
+                    pub fn returns_abi_slice<'a>() -> &'a mut [Foo] {
+                        todo!()
+                    }
+                }
+            }
+        }
     }
 }

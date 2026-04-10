@@ -19,6 +19,7 @@ use config::toml_value_from_str;
 use config::{find_top_level_attr, Config};
 use core::mem;
 use core::panic;
+use diplomat_core::ast::ModuleIncludeInfo;
 use diplomat_core::hir;
 use std::borrow::Cow;
 use std::cell::RefCell;
@@ -27,6 +28,19 @@ use std::fmt;
 use std::path::Path;
 
 pub use hir::DocsUrlGenerator;
+
+pub fn get_supported(target_language: &str) -> hir::BackendAttrSupport {
+    match target_language {
+        "c" => c::attr_support(),
+        "cpp" => cpp::attr_support(),
+        "dart" => dart::attr_support(),
+        "js" => js::attr_support(),
+        "demo_gen" => demo_gen::attr_support(),
+        "kotlin" => kotlin::attr_support(),
+        "py-nanobind" | "nanobind" => nanobind::attr_support(),
+        o => panic!("Unknown target: {}", o),
+    }
+}
 
 pub fn gen(
     entry: &Path,
@@ -50,23 +64,27 @@ pub fn gen(
         std::process::exit(1);
     }
 
+    // Set the default binding location:
+    if config
+        .shared_config
+        .custom_extra_code_location
+        .as_os_str()
+        .is_empty()
+    {
+        config.shared_config.custom_extra_code_location = entry
+            .parent()
+            .expect("Could not get parent of lib.rs")
+            .to_path_buf();
+    }
+
     // The HIR backends used to be named "c2", "js2", etc
     let target_language = target_language.strip_suffix('2').unwrap_or(target_language);
     let mut attr_validator = hir::BasicAttributeValidator::new(target_language);
-    attr_validator.support = match target_language {
-        "c" => c::attr_support(),
-        "cpp" => cpp::attr_support(),
-        "dart" => dart::attr_support(),
-        "js" => js::attr_support(),
-        "demo_gen" => {
-            // So renames and disables are carried across.
-            attr_validator.other_backend_names = vec!["js".to_string()];
-            demo_gen::attr_support()
-        }
-        "kotlin" => kotlin::attr_support(),
-        "py-nanobind" | "nanobind" => nanobind::attr_support(),
-        o => panic!("Unknown target: {}", o),
-    };
+    attr_validator.support = get_supported(target_language);
+    if matches!(target_language, "demo_gen") {
+        // So renames and disables are carried across.
+        attr_validator.other_backend_names = vec!["js".to_string()];
+    }
 
     let module = syn_inline_mod::parse_and_inline_modules(entry);
 
@@ -83,17 +101,39 @@ pub fn gen(
 
     let lowering_config = config.shared_config.lowering_config();
 
-    let tcx =
-        hir::TypeContext::from_syn(&module, lowering_config, attr_validator).unwrap_or_else(|e| {
-            for (ctx, err) in e {
-                eprintln!("Lowering error in {ctx}: {err}");
-            }
-            std::process::exit(1);
-        });
+    attr_validator.features_enabled = config.shared_config.features_enabled.clone();
+
+    let manifest_path = config
+        .shared_config
+        .manifest_dir
+        .as_ref()
+        .map(std::path::Path::new)
+        .unwrap_or(
+            entry
+                .parent()
+                .expect("Could not get parent for entry file.")
+                .parent()
+                .expect("Could not get parent folder of entry file."),
+        );
+
+    let cache = Some(&RefCell::new(HashMap::new()));
+
+    let tcx = hir::TypeContext::from_syn(
+        &module,
+        lowering_config,
+        attr_validator,
+        Some(ModuleIncludeInfo::new(manifest_path, cache)),
+    )
+    .unwrap_or_else(|e| {
+        for (ctx, err) in e {
+            eprintln!("Lowering error in {ctx}: {err}");
+        }
+        std::process::exit(1);
+    });
 
     let (files, errors) = match target_language {
-        "c" => c::run(&tcx, docs_url_gen),
-        "cpp" => cpp::run(&tcx, docs_url_gen),
+        "c" => c::run(&tcx, &config, docs_url_gen),
+        "cpp" => cpp::run(&tcx, &config, docs_url_gen),
         "dart" => dart::run(&tcx, docs_url_gen),
         "js" => js::run(&tcx, config, docs_url_gen),
         "py-nanobind" | "nanobind" => nanobind::run(&tcx, config, docs_url_gen),
@@ -192,15 +232,15 @@ impl<'tcx, E> ErrorStore<'tcx, E> {
         let old = mem::replace(&mut *self.context.borrow_mut(), new);
         ErrorContextGuard(self, old)
     }
+
     /// Set the context to a named method. Will return a scope guard that will automatically
     /// clear the context on drop.
     pub fn set_context_method<'a>(
         &'a self,
-        ty: Cow<'tcx, str>,
         method: Cow<'tcx, str>,
     ) -> ErrorContextGuard<'a, 'tcx, E> {
         let new = ErrorContext {
-            ty,
+            ty: self.context.borrow().ty.clone(),
             method: Some(method),
         };
 
@@ -244,5 +284,22 @@ pub struct ErrorContextGuard<'a, 'tcx, E>(&'a ErrorStore<'tcx, E>, ErrorContext<
 impl<E> Drop for ErrorContextGuard<'_, '_, E> {
     fn drop(&mut self) {
         let _ = mem::replace(&mut *self.0.context.borrow_mut(), mem::take(&mut self.1));
+    }
+}
+
+pub(crate) fn read_custom_binding<'a, 'b>(
+    source: &hir::IncludeSource,
+    config: &Config,
+    errors: &'b ErrorStore<'a, String>,
+) -> Result<String, ()> {
+    match source {
+        hir::IncludeSource::File(path) => {
+            let path = config.shared_config.custom_extra_code_location.join(path);
+            std::fs::read_to_string(&path).map_err(|e| {
+                errors.push_error(format!("Cannot find file {}: {e}", path.display()));
+            })
+        }
+        hir::IncludeSource::Source(s) => Ok(s.clone()),
+        _ => panic!("Unrecognized IncludeSource: {:?}", source),
     }
 }

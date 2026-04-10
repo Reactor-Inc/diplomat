@@ -3,10 +3,10 @@ source: core/src/hir/elision.rs
 expression: method
 ---
 Method {
-    docs: Docs(
-        "",
-        [],
-    ),
+    docs: Docs {
+        lines: "",
+        rust_links: [],
+    },
     name: "elided",
     abi_name: "Opaque_elided",
     lifetime_env: LifetimeEnv {
@@ -36,6 +36,7 @@ Method {
             ),
             attrs: Attrs {
                 disable: false,
+                deprecated: None,
                 namespace: None,
                 rename: RenameAttr {
                     pattern: None,
@@ -58,6 +59,8 @@ Method {
                 },
                 generate_mocking_interface: false,
                 abi_compatible: false,
+                custom_extra_code: {},
+                default_value: None,
             },
         },
     ),
@@ -93,6 +96,7 @@ Method {
             ),
             attrs: Attrs {
                 disable: false,
+                deprecated: None,
                 namespace: None,
                 rename: RenameAttr {
                     pattern: None,
@@ -115,6 +119,8 @@ Method {
                 },
                 generate_mocking_interface: false,
                 abi_compatible: false,
+                custom_extra_code: {},
+                default_value: None,
             },
         },
     ],
@@ -123,6 +129,7 @@ Method {
     ),
     attrs: Attrs {
         disable: false,
+        deprecated: None,
         namespace: None,
         rename: RenameAttr {
             pattern: None,
@@ -145,5 +152,7 @@ Method {
         },
         generate_mocking_interface: false,
         abi_compatible: false,
+        custom_extra_code: {},
+        default_value: None,
     },
 }

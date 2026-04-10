@@ -2,11 +2,11 @@
 mod ffi {
     use crate::slices::ffi::MyString;
 
-    #[diplomat::attr(not(supports = "callbacks"), disable)]
+    #[diplomat::cfg(supports = "callbacks")]
     pub struct CallbackWrapper {
         cant_be_empty: bool,
     }
-    #[diplomat::attr(not(supports = "callbacks"), disable)]
+    #[diplomat::cfg(supports = "callbacks")]
     pub struct CallbackTestingStruct {
         x: i32,
         y: i32,
@@ -136,7 +136,7 @@ mod ffi {
         }
     }
 
-    #[diplomat::attr(not(supports = "callbacks"), disable)]
+    #[diplomat::cfg(supports = "callbacks")]
     #[diplomat::opaque]
     pub struct CallbackHolder {
         held: Box<dyn Fn(i32) -> i32>,
@@ -155,8 +155,8 @@ mod ffi {
         }
     }
 
-    #[diplomat::attr(not(supports = "callbacks"), disable)]
-    #[diplomat::opaque]
+    #[diplomat::cfg(supports = "callbacks")]
+    #[diplomat::opaque_mut]
     pub struct MutableCallbackHolder {
         held: Box<dyn FnMut(i32) -> i32>,
     }
@@ -172,5 +172,13 @@ mod ffi {
         pub fn call(&mut self, a: i32) -> i32 {
             (self.held)(a)
         }
+    }
+
+    fn hidden_internal() {}
+
+    #[diplomat::attr(not(supports = "callbacks"), disable)]
+    #[diplomat::attr(kotlin, disable)]
+    pub fn free_callback_holder(f: impl Fn() -> Result<(), ()>) {
+        assert_eq!(f(), Ok(()))
     }
 }

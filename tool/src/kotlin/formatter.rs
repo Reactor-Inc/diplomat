@@ -1,11 +1,13 @@
 use diplomat_core::hir::{
     self,
     borrowing_param::{LifetimeEdge, LifetimeEdgeKind},
-    Docs, DocsTypeReferenceSyntax, DocsUrlGenerator, FloatType, IntSizeType, IntType, LifetimeEnv,
-    MaybeStatic, PrimitiveType, Slice, StringEncoding, StructPathLike, TraitId, TyPosition, Type,
-    TypeContext, TypeId,
+    Docs, DocsTypeReferenceSyntax, DocsUrlGenerator, EnumVariant, FloatType, IntSizeType, IntType,
+    LifetimeEnv, MaybeStatic, PrimitiveType, Slice, StringEncoding, StructPathLike, TraitId,
+    TyPosition, Type, TypeContext, TypeId,
 };
 use heck::ToLowerCamelCase;
+use std::collections::HashSet;
+use std::sync::LazyLock;
 use std::{borrow::Cow, iter::once};
 
 /// This type mediates all formatting
@@ -16,9 +18,50 @@ pub(super) struct KotlinFormatter<'tcx> {
     docs_url_gen: &'tcx DocsUrlGenerator,
 }
 
-const INVALID_METHOD_NAMES: &[&str] = &[
-    "new", "static", "default", "private", "internal", "toString",
-];
+static INVALID_METHOD_NAMES: LazyLock<HashSet<&str>> = LazyLock::new(|| {
+    [
+        "new", "static", "default", "private", "internal", "toString",
+    ]
+    .iter()
+    .copied()
+    .collect()
+});
+static KEYWORDS: LazyLock<HashSet<&str>> = LazyLock::new(|| {
+    [
+        "as",
+        "break",
+        "class",
+        "continue",
+        "do",
+        "else",
+        "false",
+        "for",
+        "fun",
+        "if",
+        "in",
+        "interface",
+        "is",
+        "null",
+        "object",
+        "package",
+        "return",
+        "super",
+        "this",
+        "throw",
+        "true",
+        "try",
+        "typealias",
+        "typeof",
+        "val",
+        "var",
+        "when",
+        "while",
+    ]
+    .iter()
+    .copied()
+    .collect()
+});
+
 const DISALLOWED_CORE_TYPES: &[&str] = &["Object", "String"];
 
 impl<'tcx> KotlinFormatter<'tcx> {
@@ -38,8 +81,15 @@ impl<'tcx> KotlinFormatter<'tcx> {
         "Unit"
     }
 
-    pub fn fmt_primitive_to_native_conversion(&self, name: &str, prim: PrimitiveType) -> String {
+    pub fn fmt_primitive_to_native_conversion(
+        &self,
+        name: &str,
+        prim: PrimitiveType,
+        is_param: bool,
+    ) -> String {
         match prim {
+            // parameters are bool, but for struct fields we use Byte
+            PrimitiveType::Bool if !is_param => format!("if ({name}) 1 else 0"),
             PrimitiveType::Int(IntType::U8) => format!("FFIUint8({name})"),
             PrimitiveType::Int(IntType::U16) => format!("FFIUint16({name})"),
             PrimitiveType::Int(IntType::U32) => format!("FFIUint32({name})"),
@@ -117,7 +167,7 @@ impl<'tcx> KotlinFormatter<'tcx> {
 
         let name = method.name.as_str().to_lower_camel_case();
         let name = method.attrs.rename.apply(name.into());
-        if INVALID_METHOD_NAMES.contains(&&*name) {
+        if INVALID_METHOD_NAMES.contains(&&*name) || KEYWORDS.contains(&&*name) {
             format!("{name}_").into()
         } else {
             name
@@ -129,12 +179,12 @@ impl<'tcx> KotlinFormatter<'tcx> {
             panic!("Trait methods need a name");
         }
         let name = method.name.clone().unwrap().as_str().to_lower_camel_case();
-        let name = if method.attrs.is_some() {
-            method.attrs.as_ref().unwrap().rename.apply(name.into())
+        let name = if let Some(attrs) = &method.attrs {
+            attrs.rename.apply(name.into())
         } else {
             name.into()
         };
-        if INVALID_METHOD_NAMES.contains(&&*name) {
+        if INVALID_METHOD_NAMES.contains(&&*name) || KEYWORDS.contains(&&*name) {
             format!("{name}_").into()
         } else {
             name
@@ -142,7 +192,12 @@ impl<'tcx> KotlinFormatter<'tcx> {
     }
 
     pub fn fmt_param_name<'a>(&self, ident: &'a str) -> Cow<'tcx, str> {
-        ident.to_lower_camel_case().into()
+        let name = ident.to_lower_camel_case();
+        if KEYWORDS.contains(&*name) {
+            format!("{name}_").into()
+        } else {
+            name.into()
+        }
     }
 
     pub fn fmt_borrow<'a>(&self, edge: &LifetimeEdge<'a>) -> Cow<'a, str> {
@@ -151,17 +206,22 @@ impl<'tcx> KotlinFormatter<'tcx> {
             kind: ty,
             ..
         } = edge;
-        let param_name = self.fmt_param_name(param_name).to_string();
+        // `this` is a special param and should not be formatted like a regular param
+        let param_name = if param_name == "this" {
+            param_name.into()
+        } else {
+            self.fmt_param_name(param_name)
+        };
         match ty {
             LifetimeEdgeKind::OpaqueParam => format!("listOf({param_name})").into(),
-            LifetimeEdgeKind::SliceParam => format!("listOf({param_name}Mem)").into(),
+            LifetimeEdgeKind::SliceParam => format!("listOf({param_name}SliceMemory.mem)").into(),
             LifetimeEdgeKind::StructLifetime(lt_env, lt, is_option) => {
                 assert!(
                     !is_option,
                     "Kotlin backend doesn't support Option<T> for struct/enum/primitive T"
                 );
                 let lt = lt_env.fmt_lifetime(lt);
-                format!("{param_name}.{lt}Edges").into()
+                format!("{param_name}.{lt}Edges()").into()
             }
             _ => panic!("unsupported lifetime kind"),
         }
@@ -197,7 +257,15 @@ impl<'tcx> KotlinFormatter<'tcx> {
         }
     }
 
-    pub fn fmt_field_default<'a, P: TyPosition>(&'a self, ty: &'a Type<P>) -> Cow<'tcx, str> {
+    /// This function formats a type to a default field value for use over FFI.
+    ///
+    /// `for_results` is whether this is in use in Result's FFI: Enums over FFI are all Ints, so we don't
+    /// want to call type-specific stuff when generating generic Result wrappers.
+    pub fn fmt_field_default<'a, P: TyPosition>(
+        &'a self,
+        ty: &'a Type<P>,
+        for_results: bool,
+    ) -> Cow<'tcx, str> {
         match ty {
             Type::Primitive(prim) => self.fmt_primitive_default(*prim).into(),
             Type::Opaque(op) => if op.is_optional() {
@@ -207,19 +275,27 @@ impl<'tcx> KotlinFormatter<'tcx> {
             }
             .into(),
             Type::Struct(s) => {
-                let field_type_name: &str = self.tcx.resolve_type(s.id()).name().as_ref();
+                let field_type_name = self.fmt_type_name(s.id());
                 format!("{field_type_name}Native()").into()
             }
             Type::Enum(enum_def) => {
-                let field_type_name: &str = self.tcx.resolve_enum(enum_def.tcx_id).name.as_ref();
-                format!("{field_type_name}.default().toNative()").into()
+                let field_type_name = self.fmt_type_name(enum_def.id());
+                if for_results {
+                    "0".into()
+                } else {
+                    format!("{field_type_name}.default().toNative()").into()
+                }
             }
             Type::Slice(_) => "Slice()".into(),
+            Type::DiplomatOption(inner) => {
+                let option_ty_name = self.fmt_struct_field_type_native(inner);
+                format!("Option{option_ty_name}.none()").into()
+            }
             ty => unreachable!("reached struct field that can't be handled: {ty:?}"),
         }
     }
 
-    pub fn fmt_unsized_conversion(&self, prim: PrimitiveType, optional: bool) -> Cow<str> {
+    pub fn fmt_unsized_conversion(&self, prim: PrimitiveType, optional: bool) -> Cow<'_, str> {
         let optional_conversion = if optional { "?" } else { "" };
         match prim {
             PrimitiveType::Bool => format!("{optional_conversion} > 0").into(),
@@ -238,7 +314,7 @@ impl<'tcx> KotlinFormatter<'tcx> {
         }
     }
 
-    pub fn fmt_primitive_error_type(&self, prim: PrimitiveType) -> Cow<str> {
+    pub fn fmt_primitive_error_type(&self, prim: PrimitiveType) -> Cow<'_, str> {
         match prim {
             PrimitiveType::Bool => "BoolError".into(),
             PrimitiveType::Int(IntType::U8) => "UByteError".into(),
@@ -259,18 +335,22 @@ impl<'tcx> KotlinFormatter<'tcx> {
         }
     }
 
+    /// Format the conversion of a struct field from native to Kotlin
+    /// field_val is the struct field expression, or some other expression getting the
+    /// value being converted.
     pub fn fmt_struct_field_native_to_kt<'a, P: TyPosition>(
         &'a self,
-        field_name: &'a str,
+        field_val: &'a str,
         lifetime_env: &'a LifetimeEnv,
         ty: &'a Type<P>,
     ) -> Cow<'tcx, str> {
         match ty {
             Type::Primitive(prim) => {
                 let maybe_unsized_conversion = self.fmt_unsized_conversion(*prim, false);
-                format!("nativeStruct.{field_name}{maybe_unsized_conversion}").into()
+                format!("{field_val}{maybe_unsized_conversion}").into()
             }
             Type::Opaque(opaque) => {
+                let is_owned = opaque.is_owned();
                 let lt_list: String =
                     once("listOf()".to_string()) // we only support owned opaque types, so the self edges
                                      // should be empty
@@ -296,15 +376,9 @@ impl<'tcx> KotlinFormatter<'tcx> {
                 let ty_name =
                     self.fmt_type_name(ty.id().expect("Failed to get type id for opaque"));
                 if opaque.is_optional() {
-                    format!(
-                        r#"if (nativeStruct.{field_name} == null) {{
-        null
-    }} else {{
-        {ty_name}(nativeStruct.{field_name}!!, {lt_list})
-    }}"#
-                    )
+                    format!("{field_val}?.let {{ {ty_name}(it, {lt_list}, {is_owned}) }}")
                 } else {
-                    format!("{ty_name}(nativeStruct.{field_name}, {lt_list})")
+                    format!("{ty_name}({field_val}, {lt_list}, {is_owned})")
                 }
                 .into()
             }
@@ -322,28 +396,36 @@ impl<'tcx> KotlinFormatter<'tcx> {
                         }
                     })
                     .fold(String::new(), |accum, new| format!("{accum}, {new}"));
-                format!("{ty_name}(nativeStruct.{field_name}{lt_list})").into()
+                format!("{ty_name}.fromNative({field_val}{lt_list})").into()
             }
             Type::Enum(enum_path) => {
                 let field_type_name: &str = self.tcx.resolve_enum(enum_path.tcx_id).name.as_ref();
-                format!("{field_type_name}.fromNative(nativeStruct.{field_name})").into()
+                format!("{field_type_name}.fromNative({field_val})").into()
             }
             Type::Slice(Slice::Primitive(_, prim)) => format!(
-                "PrimitiveArrayTools.get{}Array(nativeStruct.{field_name})",
+                "PrimitiveArrayTools.get{}Array({field_val})",
                 self.fmt_primitive_as_kt(*prim)
             )
             .into(),
             Type::Slice(Slice::Str(_, StringEncoding::UnvalidatedUtf16)) => {
-                format!("PrimitiveArrayTools.getUtf16(nativeStruct.{field_name})").into()
+                format!("PrimitiveArrayTools.getUtf16({field_val})").into()
             }
             Type::Slice(Slice::Str(_, _)) => {
-                format!("PrimitiveArrayTools.getUtf8(nativeStruct.{field_name})").into()
+                format!("PrimitiveArrayTools.getUtf8({field_val})").into()
             }
             Type::Slice(Slice::Strs(StringEncoding::UnvalidatedUtf16)) => {
-                format!("PrimitiveArrayTools.getUt16s(nativeStruct.{field_name})").into()
+                format!("PrimitiveArrayTools.getUt16s({field_val})").into()
             }
             Type::Slice(Slice::Strs(_)) => {
-                format!("PrimitiveArrayTools.getUt16s(nativeStruct.{field_name})").into()
+                format!("PrimitiveArrayTools.getUt16s({field_val})").into()
+            }
+            Type::DiplomatOption(ref inner) => {
+                // Kotlin allows you to .map() an Option via `val?.let { it.foo() }` where `it` is an implicit lambda argument
+                format!(
+                    "{field_val}.option()?.let {{ {} }}",
+                    self.fmt_struct_field_native_to_kt("it", lifetime_env, inner)
+                )
+                .into()
             }
             _ => todo!(),
         }
@@ -373,6 +455,7 @@ impl<'tcx> KotlinFormatter<'tcx> {
             }
             Type::Slice(Slice::Str(_, _)) => "String".into(),
             Type::Slice(Slice::Strs(_)) => "List<String>".into(),
+            Type::DiplomatOption(t) => format!("{}?", self.fmt_struct_field_type_kt(t)).into(),
             _ => todo!(),
         }
     }
@@ -405,6 +488,9 @@ impl<'tcx> KotlinFormatter<'tcx> {
             }
             Type::Enum(_) => "Int".into(),
             Type::Slice(_) => "Slice".into(),
+            Type::DiplomatOption(t) => {
+                format!("Option{}", self.fmt_struct_field_type_native(t)).into()
+            }
             ty => unreachable!("reached struct field that can't be handled: {ty:?}"),
         }
     }
@@ -451,6 +537,15 @@ impl<'tcx> KotlinFormatter<'tcx> {
         resolved.attrs.rename.apply(candidate)
     }
 
+    pub fn fmt_variant_name(&self, variant: &'tcx EnumVariant) -> Cow<'tcx, str> {
+        let name = variant.name.as_str();
+
+        if KEYWORDS.contains(&name) {
+            panic!("{name:?} is not a valid Kotlin trait name. Please rename.");
+        }
+
+        variant.attrs.rename.apply(name.into())
+    }
     pub fn fmt_nullable(&self, ident: &str) -> String {
         format!("{ident}?")
     }
@@ -470,7 +565,7 @@ pub mod test {
         let mut attr_validator = hir::BasicAttributeValidator::new("kotlin_test");
         attr_validator.support = super::super::attr_support();
 
-        match TypeContext::from_syn(&file, Default::default(), attr_validator) {
+        match TypeContext::from_syn(&file, Default::default(), attr_validator, None) {
             Ok(context) => context,
             Err(e) => {
                 for (_cx, err) in e {

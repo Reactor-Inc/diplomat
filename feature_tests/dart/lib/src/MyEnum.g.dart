@@ -4,17 +4,18 @@
 part of 'lib.g.dart';
 
 enum MyEnum {
-
+  // ignore: public_member_api_docs
   a,
-
+  // ignore: public_member_api_docs
+  @core.Deprecated('C is the new B')
   b,
-
+  // ignore: public_member_api_docs
   c,
-
+  // ignore: public_member_api_docs
   d,
-
+  /// EEEEEEE
   e,
-
+  // ignore: public_member_api_docs
   f;
 
   int get _ffi {

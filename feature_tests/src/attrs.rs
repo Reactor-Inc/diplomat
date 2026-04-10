@@ -1,8 +1,19 @@
+mod cache_test;
+mod mixins;
+
+// For mixins macro imports:
+use super::*;
+
 #[diplomat::bridge]
 #[diplomat::abi_rename = "namespace_{0}"]
-#[diplomat::attr(not(any(c, kotlin)), rename = "Renamed{0}")]
+#[diplomat::attr(not(c), rename = "Renamed{0}")]
 #[diplomat::attr(auto, namespace = "ns")]
+#[diplomat::include("src/attrs/mixins.rs")]
+#[diplomat::include("src/attrs/cache_test.rs")]
 pub mod ffi {
+    super::mixin_macro! {}
+    super::cache_test_macro! {RenamedCachedIncludeZST}
+
     #[diplomat::macro_rules]
     macro_rules! impl_mac {
         ($arg1:ident, $arg2:ident, $arg3:block) => {
@@ -20,7 +31,7 @@ pub mod ffi {
     #[diplomat::macro_rules]
     macro_rules! create_vec {
         ($vec_name:ident contains "hello"; [$ty:ident]) => {
-            #[diplomat::opaque]
+            #[diplomat::opaque_mut]
             pub struct $vec_name(Vec<$ty>);
 
             impl $vec_name {
@@ -53,12 +64,26 @@ pub mod ffi {
     #[diplomat::opaque]
     // Attr for generating mocking interface in kotlin backend to enable JVM test fakes.
     #[diplomat::attr(kotlin, generate_mocking_interface)]
-    #[diplomat::attr(not(kotlin), rename = "AttrOpaque1Renamed")]
+    #[diplomat::attr(*, rename = "AttrOpaque1Renamed")]
+    /// Some example docs
+    #[diplomat::docs(any(nanobind, cpp))]
+    /// Some Nanobind/C++ example docs
+    #[diplomat::docs(js)]
+    /// Some JS example docs
+    #[diplomat::docs(*)]
+    /// Back to all docs
     pub struct AttrOpaque1;
 
     impl AttrOpaque1 {
+        #[diplomat::cfg(supports=method_overloading)]
+        #[diplomat::attr(auto, constructor)]
+        pub fn new_overload(_i: i32) -> Box<AttrOpaque1> {
+            Box::new(AttrOpaque1)
+        }
+
         #[diplomat::attr(not(kotlin), rename = "totally_not_{0}")]
         #[diplomat::attr(auto, constructor)]
+        /// More example docs
         pub fn new() -> Box<AttrOpaque1> {
             Box::new(AttrOpaque1)
         }
@@ -106,7 +131,7 @@ pub mod ffi {
 
     #[diplomat::opaque]
     #[diplomat::attr(auto, namespace = "")]
-    #[diplomat::attr(not(kotlin), rename = "Unnamespaced")]
+    #[diplomat::attr(*, rename = "Unnamespaced")]
     pub struct Unnamespaced;
 
     impl Unnamespaced {
@@ -129,7 +154,7 @@ pub mod ffi {
     pub struct Nested2;
 
     #[diplomat::opaque]
-    #[diplomat::attr(not(supports = comparators), disable)]
+    #[diplomat::cfg(supports = comparators)]
     pub struct Comparable(u8);
 
     impl Comparable {
@@ -143,11 +168,11 @@ pub mod ffi {
     }
 
     #[diplomat::opaque]
-    #[diplomat::attr(not(supports = indexing), disable)]
+    #[diplomat::cfg(supports = indexing)]
     pub struct MyIndexer(Vec<String>);
 
     #[diplomat::opaque]
-    #[diplomat::attr(not(supports = iterators), disable)]
+    #[diplomat::cfg(supports = iterators)]
     pub struct MyIterable(Vec<u8>);
 
     impl MyIterable {
@@ -160,14 +185,14 @@ pub mod ffi {
             Box::new(MyIterator(self.0.iter()))
         }
         #[diplomat::attr(nanobind, rename = "__len__")]
-        #[diplomat::attr(not(nanobind), disable)]
+        #[diplomat::cfg(nanobind)]
         pub fn len(&self) -> usize {
             self.0.len()
         }
     }
 
-    #[diplomat::opaque]
-    #[diplomat::attr(not(supports = iterators), disable)]
+    #[diplomat::opaque_mut]
+    #[diplomat::cfg(supports = iterators)]
     pub struct MyIterator<'a>(std::slice::Iter<'a, u8>);
     impl<'a> MyIterator<'a> {
         #[diplomat::attr(auto, iterator)]
@@ -177,25 +202,47 @@ pub mod ffi {
     }
 
     impl MyIndexer {
+        #[diplomat::attr(auto, constructor)]
+        pub fn new(v: DiplomatSlice<DiplomatStrSlice>) -> Box<Self> {
+            let boxed: &[DiplomatStrSlice] = v.into();
+            let new_vec = boxed
+                .iter()
+                .map(|sl| String::from_utf8(sl.to_vec()).unwrap())
+                .collect::<Vec<_>>();
+            Box::new(Self(new_vec))
+        }
+
         #[diplomat::attr(auto, indexer)]
         pub fn get<'a>(&'a self, i: usize) -> Option<&'a DiplomatStr> {
             self.0.get(i).as_ref().map(|string| string.as_bytes())
         }
+
+        #[diplomat::cfg(all(supports=method_overloading, not(kotlin)))]
+        #[diplomat::attr(auto, indexer)]
+        pub fn get_str<'a>(&'a self, s: &DiplomatStr) -> Option<&'a DiplomatStr> {
+            let st = String::from_utf8(s.to_vec()).unwrap();
+            self.0.iter().find(|i| **i == st).map(|s| s.as_bytes())
+        }
     }
 
     #[diplomat::opaque]
-    #[diplomat::attr(not(supports = iterators), disable)]
+    #[diplomat::cfg(supports = iterators)]
     struct OpaqueIterable(Vec<AttrOpaque1>);
 
     impl OpaqueIterable {
+        #[diplomat::attr(auto, constructor)]
+        pub fn new(size: usize) -> Box<Self> {
+            Box::new(Self(vec![AttrOpaque1; size]))
+        }
+
         #[diplomat::attr(auto, iterable)]
         pub fn iter<'a>(&'a self) -> Box<OpaqueIterator<'a>> {
             Box::new(OpaqueIterator(Box::new(self.0.iter().cloned())))
         }
     }
 
-    #[diplomat::opaque]
-    #[diplomat::attr(not(supports = iterators), disable)]
+    #[diplomat::opaque_mut]
+    #[diplomat::cfg(supports = iterators)]
     struct OpaqueIterator<'a>(Box<dyn Iterator<Item = AttrOpaque1> + 'a>);
     impl<'a> OpaqueIterator<'a> {
         #[diplomat::attr(auto, iterator)]
@@ -205,22 +252,59 @@ pub mod ffi {
     }
 
     #[diplomat::opaque]
-    #[diplomat::attr(not(supports = arithmetic), disable)]
+    #[diplomat::cfg(supports = iterators)]
+    struct OpaqueRefIterable(Vec<AttrOpaque1>);
+
+    impl OpaqueRefIterable {
+        #[diplomat::attr(auto, constructor)]
+        pub fn new(size: usize) -> Box<Self> {
+            Box::new(Self(vec![AttrOpaque1; size]))
+        }
+
+        #[diplomat::attr(auto, iterable)]
+        pub fn iter<'a>(&'a self) -> Box<OpaqueRefIterator<'a>> {
+            Box::new(OpaqueRefIterator(self.0.iter()))
+        }
+    }
+
+    #[diplomat::opaque_mut]
+    #[diplomat::cfg(supports = iterators)]
+    struct OpaqueRefIterator<'a>(std::slice::Iter<'a, AttrOpaque1>);
+    impl<'a> OpaqueRefIterator<'a> {
+        #[diplomat::attr(auto, iterator)]
+        pub fn next(&'a mut self) -> Option<&'a AttrOpaque1> {
+            self.0.next()
+        }
+    }
+
+    #[diplomat::opaque_mut]
+    #[diplomat::cfg(supports = arithmetic)]
     pub(crate) struct OpaqueArithmetic {
         x: i32,
         y: i32,
     }
 
     impl OpaqueArithmetic {
-        pub fn make(x: i32, y: i32) -> Box<Self> {
+        pub fn make(x: i32, #[diplomat::attr(auto, default_value = 12)] y: i32) -> Box<Self> {
             Box::new(Self { x, y })
         }
 
         #[diplomat::attr(supports=method_overloading, rename="make")]
-        pub fn make_overload(x: f32, y: f32) -> Box<Self> {
+        pub fn make_overload(
+            x: f32,
+            #[diplomat::attr(auto, default_value = 14.48)] y: f32,
+        ) -> Box<Self> {
             Box::new(Self {
                 x: (x as i32) + 2,
                 y: y as i32,
+            })
+        }
+
+        #[diplomat::attr(supports=method_overloading, rename="make")]
+        pub fn make_overload_rename_arg(x: f32, z: bool) -> Box<Self> {
+            Box::new(Self {
+                x: (x as i32) + 2,
+                y: z as i32,
             })
         }
 
@@ -310,7 +394,22 @@ pub mod ffi {
         pub fn c(self) -> u32 {
             5
         }
+
+        #[deprecated(note = "use Foo")]
+        pub fn deprecated(self) {}
     }
+
+    #[deprecated(note = "use Foo")]
+    pub struct DeprecatedStruct;
+
+    #[deprecated(note = "use Foo")]
+    pub enum DeprecatedEnum {
+        A,
+    }
+
+    #[diplomat::opaque]
+    #[deprecated(note = "use Foo")]
+    pub struct DeprecatedOpaque;
 
     #[diplomat::macro_rules]
     macro_rules! macro_frag_spec_test {
@@ -349,4 +448,239 @@ pub mod ffi {
     } [EXPR 0, IDENT TestMacroStruct] LT 'a literal "Testing" <=> diplomat::attr(auto, constructor) std::fmt::Write; {
         fn hello() {}
     } f64, pub, const IT:usize = 0;}
+
+    #[diplomat::attr(not(supports = free_functions), disable)]
+    #[diplomat::attr(cpp, custom_extra_code(source = "//Test", location = "pre_impl_block"))]
+    #[diplomat::attr(cpp, custom_extra_code(source = "//End Test", location = "impl_block"))]
+    pub fn free_func_test(x: i32) -> i32 {
+        x + 5
+    }
+
+    #[diplomat::attr(not(supports = free_functions), disable)]
+    #[diplomat::attr(auto, namespace = "nested::ns")]
+    pub fn nested_ns_fn(#[diplomat::attr(auto, default_value = true)] x: bool) -> bool {
+        !x
+    }
+
+    /// Testing support for List[str] in Nanobind
+    #[diplomat::opaque]
+    #[diplomat::cfg(supports = custom_bindings)]
+    #[diplomat::attr(
+        cpp,
+        custom_extra_code(
+            file = "custom_binds/cpp/RenamedStringList.d.hpp",
+            location = "def_block"
+        )
+    )]
+    #[diplomat::attr(
+        cpp,
+        custom_extra_code(
+            file = "custom_binds/cpp/RenamedStringList.hpp",
+            location = "impl_block"
+        )
+    )]
+    #[diplomat::attr(
+        nanobind,
+        custom_extra_code(
+            file = "custom_binds/nanobind/RenamedStringList.hpp",
+            location = "impl_block"
+        )
+    )]
+    #[repr(C)]
+    pub struct StringList(DiplomatOwnedStrSlice);
+
+    impl StringList {
+        // We want to generate the bindings for this ourselves:
+        #[diplomat::attr(cpp, disable)]
+        pub fn return_new() -> Box<Self> {
+            let sl: Box<[u8]> = Box::new(*b"Test!");
+            Box::new(Self(sl.into()))
+        }
+    }
+
+    #[diplomat::opaque]
+    #[diplomat::cfg(supports = custom_bindings)]
+    #[diplomat::attr(
+        any(nanobind, cpp),
+        custom_extra_code(
+            source = "public:
+    const static bool custom_bool = false;
+    static std::string special_function();",
+            location = "def_block"
+        )
+    )]
+    #[diplomat::attr(
+        any(nanobind, cpp),
+        custom_extra_code(source = "//Pre Test", location = "pre_def_block")
+    )]
+    #[diplomat::attr(
+        any(nanobind, cpp),
+        custom_extra_code(source = "//Post Test", location = "post_def_block")
+    )]
+    #[diplomat::attr(
+        any(nanobind, cpp),
+        custom_extra_code(
+            source = r#"std::string somelib::ns::RenamedBlockOverride::special_function() {
+    return "This is a custom binding.";
+}"#,
+            location = "impl_block"
+        )
+    )]
+    #[diplomat::attr(
+        any(nanobind, cpp),
+        custom_extra_code(source = "//Test!", location = "pre_impl_block")
+    )]
+    #[diplomat::attr(
+        nanobind,
+        custom_extra_code(
+            source = r#"opaque.def("special_function", &somelib::ns::RenamedBlockOverride::special_function);"#,
+            location = "init_block"
+        )
+    )]
+    #[diplomat::attr(
+        nanobind,
+        custom_extra_code(source = "//Pre-Init Test", location = "pre_init_block")
+    )]
+    pub struct BlockOverride();
+
+    // C++ will not generate this, since it has all features disabled by default (see lib.rs)
+    #[diplomat::attr(not(feature=some_feature), disable)]
+    pub struct FeatureTest();
+
+    #[diplomat::attr(not(nanobind), disable)]
+    #[diplomat::opaque_mut]
+    /// Tests for https://github.com/rust-diplomat/diplomat/issues/1050.
+    /// C++ generates unique_ptrs for Opaque ZSTs, and Nanobind
+    /// expects every unique_ptr it converts to wrap a unique pointer type. It errors otherwise.
+    /// This is not the case, as in Rust pointers to ZSTs are always the same address.
+    pub struct OpaqueZST;
+
+    impl OpaqueZST {
+        #[diplomat::attr(auto, constructor)]
+        pub fn ctor() -> Box<Self> {
+            Box::new(Self)
+        }
+
+        pub fn make() -> Box<Self> {
+            Box::new(Self)
+        }
+
+        #[diplomat::attr(auto, getter)]
+        pub fn out_string(w: &mut DiplomatWrite) {
+            write!(w, "Test!").expect("Could not write");
+        }
+
+        pub fn member(&self) -> Box<Self> {
+            Box::new(Self)
+        }
+
+        pub fn mut_member(&mut self) -> Box<Self> {
+            Box::new(Self)
+        }
+
+        #[diplomat::attr(auto, add)]
+        pub fn add(&self, _o: &Self) -> Box<Self> {
+            Box::new(OpaqueZST)
+        }
+
+        #[diplomat::attr(auto, sub)]
+        pub fn sub(&self, _o: &Self) -> Box<Self> {
+            Box::new(Self)
+        }
+
+        #[diplomat::attr(auto, mul)]
+        pub fn mul(&self, _o: &Self) -> Box<Self> {
+            Box::new(Self)
+        }
+
+        #[diplomat::attr(auto, div)]
+        pub fn div(&self, _o: &Self) -> Box<Self> {
+            Box::new(Self)
+        }
+
+        pub fn success_zst(return_success: bool) -> Result<Box<Self>, ()> {
+            if return_success {
+                Ok(Box::new(Self))
+            } else {
+                Err(())
+            }
+        }
+
+        pub fn fail_zst(return_success: bool) -> Result<(), Box<Self>> {
+            if return_success {
+                Ok(())
+            } else {
+                Err(Box::new(Self))
+            }
+        }
+
+        pub fn success_fail_zst(return_success: bool) -> Result<Box<Self>, Box<Self>> {
+            if return_success {
+                Ok(Box::new(Self))
+            } else {
+                Err(Box::new(Self))
+            }
+        }
+
+        pub fn optional_zst(is_some: bool) -> Option<Box<Self>> {
+            if is_some {
+                Some(Box::new(Self))
+            } else {
+                None
+            }
+        }
+
+        #[diplomat::attr(auto, getter)]
+        pub fn static_getter() -> Box<Self> {
+            Box::new(Self)
+        }
+
+        #[diplomat::attr(auto, setter = "static_getter")]
+        pub fn static_setter(_a: &Self) {}
+
+        #[diplomat::attr(auto, getter)]
+        pub fn getter(&self) -> Box<Self> {
+            Box::new(Self)
+        }
+
+        #[diplomat::attr(auto, setter = "getter")]
+        pub fn setter(&self, _a: &Self) {}
+
+        #[diplomat::attr(auto, iterable)]
+        pub fn iter(&self) -> Box<OpaqueZSTIterator> {
+            Box::new(OpaqueZSTIterator)
+        }
+
+        #[diplomat::attr(auto, indexer)]
+        pub fn indexer(&self, _idx: usize) -> Box<Self> {
+            Box::new(Self)
+        }
+    }
+
+    #[diplomat::attr(not(nanobind), disable)]
+    #[diplomat::opaque]
+    /// Tests for https://github.com/rust-diplomat/diplomat/issues/1050.
+    pub struct OpaqueZSTIterator;
+
+    impl OpaqueZSTIterator {
+        #[diplomat::attr(auto, constructor)]
+        pub fn ctor() -> Box<Self> {
+            Box::new(Self)
+        }
+
+        #[diplomat::attr(auto, iterator)]
+        pub fn next(&self) -> Option<Box<Self>> {
+            Some(Box::new(Self))
+        }
+
+        #[diplomat::attr(auto, indexer)]
+        pub fn nullable_indexer(&self, _idx: usize) -> Option<Box<Self>> {
+            Some(Box::new(Self))
+        }
+
+        #[diplomat::attr(auto, stringifier)]
+        pub fn stringify(&self, _w: &mut DiplomatWrite) -> Result<(), Box<OpaqueZST>> {
+            Err(Box::new(OpaqueZST))
+        }
+    }
 }

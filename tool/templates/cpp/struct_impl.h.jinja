@@ -1,26 +1,34 @@
 {% include "c_include.h.jinja" %}
 
+{% if !extra_impl_code.pre.is_empty() -%}
+{{ extra_impl_code.pre }}
+{% endif -%}
+
 {% for m in methods -%}
-{% include "method_impl.h.jinja" %}
+{%- include "function_defs/method_impl.h.jinja" %}
 
 {% endfor ~%}
 
 {%- if !cpp_to_c_fields.is_empty() %}
 inline {{ctype}} {{type_name}}::AsFFI() const {
-	return {{ctype}} {
+    return {{ctype}} {
 {%- for field in cpp_to_c_fields %}
-		/* .{{field.var_name}} = */ {{field.expression}},
+        /* .{{field.var_name}} = */ {{field.expression}},
 {%- endfor %}
-	};
+    };
 }
 
 inline {{type_name}} {{type_name}}::FromFFI({{ctype}} c_struct) {
-	return {{type_name}} {
+    return {{type_name}} {
 {%- for field in c_to_cpp_fields %}
-		/* .{{field.var_name}} = */ {{field.expression}},
+        /* .{{field.var_name}} = */ {{field.expression}},
 {%- endfor %}
-	};
+    };
 }
 {%- endif %}
 
+{#+ -#}
 
+{% if !extra_impl_code.inner.is_empty() %}
+{{ extra_impl_code.inner }}
+{% endif -%}

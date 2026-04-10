@@ -1,0 +1,66 @@
+{% macro method_name_cpp_inner(method_name=Option::<String>::None) -%}
+{%- block pre_cpp_method_name  -%}{%- endblock -%}
+{%- if let Some(m) = method_name -%}
+{{- m -}}
+{%- else -%}
+{%- block cpp_method_name -%}{%- endblock -%}
+{%- endif -%}
+{%- endmacro -%}
+{%- macro overload_method_name_cpp(overload_params, method_name=Option::<String>::None) -%}
+{%- if overload_params.len() > 0 -%}
+nb::overload_cast<{% for p in overload_params -%} {{- p.type_name -}} {%- if !loop.last -%}, {% endif %} {%- endfor
+    -%}>(
+{%- endif -%}
+&{{- method_name_cpp_inner(method_name) -}}
+{%- if m.overloads.len() > 0 -%} ) {%- endif -%}
+{%- endmacro -%}
+{%- macro method_name_cpp(pre_call="std::move(maybe_op_unwrap(", post_call="))") -%}
+    {%- decl success_owned_op -%}
+    {%- if let hir::SuccessType::OutType(hir::Type::Opaque(op)) = m.method.output.success_type() -%}
+    {%- let success_owned_op = op.is_owned() -%}
+    {%- else -%}
+    {%- let success_owned_op = false -%}
+    {%- endif -%}
+
+    {%- decl failure_owned_op -%}
+    {%- if let hir::ReturnType::Fallible(_s, Some(hir::Type::Opaque(op))) = m.method.output -%}
+    {%- let failure_owned_op = op.is_owned() -%}
+    {%- else -%}
+    {%- let failure_owned_op = false -%}
+    {%- endif -%}
+
+    {%- if success_owned_op || failure_owned_op -%}
+    {{-pre_call-}}{{- caller() -}}{{- post_call -}}
+    {%- else -%}
+    {{- caller() -}}
+    {%- endif -%}
+{%- endmacro -%}
+{% import "method_params.cpp.jinja" as method_params %}
+    .{{m.def}}
+{%- if let Some(special_method) = m.method.attrs.special_method.as_ref() -%}
+{%- block special_methods -%}{%- endblock -%}
+{%- else -%}
+("{{m.method_name}}", {#+ -#}
+    {%- decl main_overload_params -%}
+    {%- if m.overloads.len() > 0 -%}
+    {%- let main_overload_params = m.param_decls.params.clone() -%}
+    {%- else -%}
+    {%- let main_overload_params = vec![] -%}
+    {%- endif -%}
+
+    {%- call method_name_cpp()-%}
+    {{-overload_method_name_cpp(main_overload_params)-}}
+    {%- endcall -%}
+    {{- method_params::params(m.method.params, m.lifetime_args) -}})
+    {%- endif -%}
+
+    {%- if m.overloads.len() > 0 %}
+    {#- Constructors have special overload behavior. -#}
+    {%- if let Some(hir::SpecialMethod::Constructor) = m.method.attrs.special_method -%}{%- else -%}
+    {%- for o in m.overloads %}
+    .{{m.def}}("{{m.method_name}}", {% call method_name_cpp()-%} {{-overload_method_name_cpp(o.parameters.params.clone(), o.method_name)-}}
+    {%- endcall -%}
+        {{- method_params::params(o.parameters.params, m.lifetime_args) -}})
+        {%- endfor -%}
+    {%- endif -%}
+        {%- endif -%}

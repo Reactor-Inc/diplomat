@@ -10,7 +10,7 @@ mod methods;
 pub use methods::{BorrowedParams, Method, Param, SelfParam, TraitSelfParam};
 
 mod modules;
-pub use modules::{File, Module};
+pub use modules::{File, Module, ModuleIncludeInfo};
 
 mod structs;
 pub use structs::Struct;
@@ -30,6 +30,9 @@ pub use types::{
     StringEncoding, TypeName,
 };
 
+mod functions;
+pub use functions::Function;
+
 pub(crate) mod lifetimes;
 pub use lifetimes::{Lifetime, LifetimeEnv, LifetimeTransitivity, NamedLifetime};
 
@@ -40,10 +43,7 @@ mod idents;
 pub use idents::Ident;
 
 mod docs;
-pub use docs::{
-    DocType, Docs, DocsUrlGenerator, RustLink, RustLinkDisplay,
-    TypeReferenceSyntax as DocsTypeReferenceSyntax,
-};
+pub use docs::{DocType, Docs, RustLink, RustLinkDisplay};
 
 mod macros;
 pub use macros::{MacroDef, MacroUse, Macros};

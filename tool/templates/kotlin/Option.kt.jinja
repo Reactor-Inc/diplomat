@@ -1,8 +1,8 @@
-internal class Option{{type_name}}: Structure(), Structure.ByValue  {
-    {%- match default%}
+internal class Option{{ffi_type_name}} constructor(): Structure(), Structure.ByValue {
+    {%- match ffi_default %}
     {%- when Some with (default_value)%}
     @JvmField
-    internal var value: {{type_name}} = {{default_value}}
+    internal var value: {{ffi_type_name}} = {{default_value}}
 
     {% when None -%}
     {%- endmatch -%}
@@ -14,9 +14,9 @@ internal class Option{{type_name}}: Structure(), Structure.ByValue  {
         return listOf("value", "isOk")
     }
 
-    internal fun option(): {{type_name}}? {
+    internal fun option(): {{ffi_type_name}}? {
         if (isOk == 1.toByte()) {
-            {%- match default %}
+            {%- match ffi_default %}
             {%- when Some with (_) %}
             return value
             {%- when None %}
@@ -26,4 +26,21 @@ internal class Option{{type_name}}: Structure(), Structure.ByValue  {
             return null
         }
     }
+
+{% if let Some(default_value) = ffi_default %}
+    constructor(value: {{ffi_type_name}}, isOk: Byte): this() {
+        this.value = value
+        this.isOk = isOk
+    }
+
+    companion object {
+        internal fun some(value: {{ffi_type_name}}): Option{{ffi_type_name}} {
+            return Option{{ffi_type_name}}(value, 1)
+        }
+
+        internal fun none(): Option{{ffi_type_name}} {
+            return Option{{ffi_type_name}}({{default_value}}, 0)
+        }
+    }
+{% endif %}
 }

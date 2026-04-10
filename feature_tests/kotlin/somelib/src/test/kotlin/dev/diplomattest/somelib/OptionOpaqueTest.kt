@@ -11,7 +11,7 @@ class OptionOpaqueTest {
     @Test
     fun testOption() {
         val libClass: Class<OptionOpaqueLib> = OptionOpaqueLib::class.java
-        val lib: OptionOpaqueLib = Native.load("somelib", libClass)
+        val lib: OptionOpaqueLib = Native.load("diplomat_feature_tests", libClass)
         val ptr = lib.OptionOpaque_new(0)
         val ptr_2 = lib.OptionOpaque_new_none()
         assert(ptr != null)
@@ -39,5 +39,21 @@ class OptionOpaqueTest {
         assertEquals(someOption.optionI32(), 10)
         assertEquals(someOption.optionU32(), 10.toUInt())
 
+    }
+
+    @Test
+    fun testAcceptsOptionStruct() {
+        var maybeStruct = OptionOpaque.acceptsOptionInputStruct(null, 123.toUByte())
+        assertEquals(maybeStruct, null)
+        val inner = OptionInputStruct.newFromParts(7.toUByte(), null, OptionEnum.Bar)
+        maybeStruct = OptionOpaque.acceptsOptionInputStruct(inner, 123.toUByte())
+        assertEquals(maybeStruct!!.a, 7.toUByte())
+        assertEquals(maybeStruct!!.b, null)
+        assertEquals(maybeStruct!!.c, OptionEnum.Bar)
+
+        val returned = OptionOpaque.returnsOptionInputStruct();
+        assertEquals(returned.a, 6.toUByte());
+        assertEquals(returned.b, null);
+        assertEquals(returned.c, OptionEnum.Bar);
     }
 }

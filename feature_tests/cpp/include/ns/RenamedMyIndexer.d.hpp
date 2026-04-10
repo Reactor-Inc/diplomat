@@ -1,5 +1,5 @@
-#ifndef ns_RenamedMyIndexer_D_HPP
-#define ns_RenamedMyIndexer_D_HPP
+#ifndef SOMELIB_ns_RenamedMyIndexer_D_HPP
+#define SOMELIB_ns_RenamedMyIndexer_D_HPP
 
 #include <stdio.h>
 #include <stdint.h>
@@ -10,33 +10,44 @@
 #include <optional>
 #include <cstdlib>
 #include "../diplomat_runtime.hpp"
-
-
+namespace somelib {
 namespace ns {
+namespace capi { struct RenamedMyIndexer; }
+class RenamedMyIndexer;
+} // namespace ns
+} // namespace somelib
+
+
+
+namespace somelib::ns {
 namespace capi {
     struct RenamedMyIndexer;
 } // namespace capi
 } // namespace
 
-namespace ns {
+namespace somelib::ns {
 class RenamedMyIndexer {
 public:
 
+  inline static std::unique_ptr<somelib::ns::RenamedMyIndexer> new_(somelib::diplomat::span<const diplomat::string_view_for_slice> v);
+
   inline std::optional<std::string_view> operator[](size_t i) const;
 
-  inline const ns::capi::RenamedMyIndexer* AsFFI() const;
-  inline ns::capi::RenamedMyIndexer* AsFFI();
-  inline static const ns::RenamedMyIndexer* FromFFI(const ns::capi::RenamedMyIndexer* ptr);
-  inline static ns::RenamedMyIndexer* FromFFI(ns::capi::RenamedMyIndexer* ptr);
-  inline static void operator delete(void* ptr);
+  inline std::optional<std::string_view> operator[](std::string_view s) const;
+
+    inline const somelib::ns::capi::RenamedMyIndexer* AsFFI() const;
+    inline somelib::ns::capi::RenamedMyIndexer* AsFFI();
+    inline static const somelib::ns::RenamedMyIndexer* FromFFI(const somelib::ns::capi::RenamedMyIndexer* ptr);
+    inline static somelib::ns::RenamedMyIndexer* FromFFI(somelib::ns::capi::RenamedMyIndexer* ptr);
+    inline static void operator delete(void* ptr);
 private:
-  RenamedMyIndexer() = delete;
-  RenamedMyIndexer(const ns::RenamedMyIndexer&) = delete;
-  RenamedMyIndexer(ns::RenamedMyIndexer&&) noexcept = delete;
-  RenamedMyIndexer operator=(const ns::RenamedMyIndexer&) = delete;
-  RenamedMyIndexer operator=(ns::RenamedMyIndexer&&) noexcept = delete;
-  static void operator delete[](void*, size_t) = delete;
+    RenamedMyIndexer() = delete;
+    RenamedMyIndexer(const somelib::ns::RenamedMyIndexer&) = delete;
+    RenamedMyIndexer(somelib::ns::RenamedMyIndexer&&) noexcept = delete;
+    RenamedMyIndexer operator=(const somelib::ns::RenamedMyIndexer&) = delete;
+    RenamedMyIndexer operator=(somelib::ns::RenamedMyIndexer&&) noexcept = delete;
+    static void operator delete[](void*, size_t) = delete;
 };
 
 } // namespace
-#endif // ns_RenamedMyIndexer_D_HPP
+#endif // SOMELIB_ns_RenamedMyIndexer_D_HPP

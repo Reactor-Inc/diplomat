@@ -1,7 +1,11 @@
 lib-name = "somelib"
 
+[cpp]
+lib-name = "icu4x"
+
 [kotlin]
 domain = "dev.diplomattest"
+dylib-name = "diplomat_example"
 
 [demo-gen]
 relative-js-path = "../../js/lib/api/"

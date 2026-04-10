@@ -2,6 +2,12 @@
 export { codepoint } from './diplomat-runtime';
 
 
+export { RenamedDeprecatedStruct } from "./RenamedDeprecatedStruct"
+
+export { RenamedFeatureTest } from "./RenamedFeatureTest"
+
+export { RenamedRenamedCachedIncludeZST } from "./RenamedRenamedCachedIncludeZST"
+
 export { RenamedStructWithAttrs, RenamedStructWithAttrs_obj } from "./RenamedStructWithAttrs"
 
 export { RenamedTestMacroStruct, RenamedTestMacroStruct_obj } from "./RenamedTestMacroStruct"
@@ -16,7 +22,11 @@ export { BorrowedFieldsWithBounds, BorrowedFieldsWithBounds_obj } from "./Borrow
 
 export { NestedBorrowedFields, NestedBorrowedFields_obj } from "./NestedBorrowedFields"
 
+export { BorrowingOptionStruct, BorrowingOptionStruct_obj } from "./BorrowingOptionStruct"
+
 export { OptionInputStruct, OptionInputStruct_obj } from "./OptionInputStruct"
+
+export { CachedIncludeZST } from "./CachedIncludeZST"
 
 export { ErrorStruct, ErrorStruct_obj } from "./ErrorStruct"
 
@@ -46,6 +56,10 @@ export { AttrOpaque1Renamed } from "./AttrOpaque1Renamed"
 
 export { RenamedAttrOpaque2 } from "./RenamedAttrOpaque2"
 
+export { RenamedDeprecatedOpaque } from "./RenamedDeprecatedOpaque"
+
+export { RenamedMixinTest } from "./RenamedMixinTest"
+
 export { RenamedMyIterable } from "./RenamedMyIterable"
 
 export { RenamedMyIterator } from "./RenamedMyIterator"
@@ -57,6 +71,10 @@ export { RenamedNested2 } from "./RenamedNested2"
 export { RenamedOpaqueIterable } from "./RenamedOpaqueIterable"
 
 export { RenamedOpaqueIterator } from "./RenamedOpaqueIterator"
+
+export { RenamedOpaqueRefIterable } from "./RenamedOpaqueRefIterable"
+
+export { RenamedOpaqueRefIterator } from "./RenamedOpaqueRefIterator"
 
 export { RenamedTestOpaque } from "./RenamedTestOpaque"
 
@@ -103,6 +121,8 @@ export { OpaqueMutexedString } from "./OpaqueMutexedString"
 export { Utf16Wrap } from "./Utf16Wrap"
 
 export { RenamedAttrEnum } from "./RenamedAttrEnum"
+
+export { RenamedDeprecatedEnum } from "./RenamedDeprecatedEnum"
 
 export { UnimportedEnum } from "./UnimportedEnum"
 

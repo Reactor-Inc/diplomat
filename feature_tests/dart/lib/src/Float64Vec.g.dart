@@ -66,14 +66,9 @@ final class Float64Vec implements ffi.Finalizable {
 
   core.List<double> get asSlice {
     // This lifetime edge depends on lifetimes: 'a
-    core.List<Object> aEdges = [this];
+    final aEdges = [this];
     final result = _Float64Vec_as_slice(_ffi);
     return result._toDart(aEdges);
-  }
-
-  void fillSlice(core.List<double> v) {
-    final temp = _FinalizedArena();
-    _Float64Vec_fill_slice(_ffi, v._float64AllocIn(temp.arena));
   }
 
   void setValue(core.List<double> newSlice) {
@@ -90,7 +85,7 @@ final class Float64Vec implements ffi.Finalizable {
 
   core.List<double> borrow() {
     // This lifetime edge depends on lifetimes: 'a
-    core.List<Object> aEdges = [this];
+    final aEdges = [this];
     final result = _Float64Vec_borrow(_ffi);
     return result._toDart(aEdges);
   }
@@ -149,11 +144,6 @@ external ffi.Pointer<ffi.Opaque> _Float64Vec_new_from_owned(_SliceDouble v);
 @ffi.Native<_SliceDouble Function(ffi.Pointer<ffi.Opaque>)>(isLeaf: true, symbol: 'Float64Vec_as_slice')
 // ignore: non_constant_identifier_names
 external _SliceDouble _Float64Vec_as_slice(ffi.Pointer<ffi.Opaque> self);
-
-@_DiplomatFfiUse('Float64Vec_fill_slice')
-@ffi.Native<ffi.Void Function(ffi.Pointer<ffi.Opaque>, _SliceDouble)>(isLeaf: true, symbol: 'Float64Vec_fill_slice')
-// ignore: non_constant_identifier_names
-external void _Float64Vec_fill_slice(ffi.Pointer<ffi.Opaque> self, _SliceDouble v);
 
 @_DiplomatFfiUse('Float64Vec_set_value')
 @ffi.Native<ffi.Void Function(ffi.Pointer<ffi.Opaque>, _SliceDouble)>(isLeaf: true, symbol: 'Float64Vec_set_value')

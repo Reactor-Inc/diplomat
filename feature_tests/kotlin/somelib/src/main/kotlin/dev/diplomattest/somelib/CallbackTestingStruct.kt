@@ -21,15 +21,67 @@ internal class CallbackTestingStructNative: Structure(), Structure.ByValue {
     }
 }
 
-class CallbackTestingStruct internal constructor (
-    internal val nativeStruct: CallbackTestingStructNative) {
-    val x: Int = nativeStruct.x
-    val y: Int = nativeStruct.y
+
+
+
+internal class OptionCallbackTestingStructNative constructor(): Structure(), Structure.ByValue {
+    @JvmField
+    internal var value: CallbackTestingStructNative = CallbackTestingStructNative()
+
+    @JvmField
+    internal var isOk: Byte = 0
+
+    // Define the fields of the struct
+    override fun getFieldOrder(): List<String> {
+        return listOf("value", "isOk")
+    }
+
+    internal fun option(): CallbackTestingStructNative? {
+        if (isOk == 1.toByte()) {
+            return value
+        } else {
+            return null
+        }
+    }
+
+
+    constructor(value: CallbackTestingStructNative, isOk: Byte): this() {
+        this.value = value
+        this.isOk = isOk
+    }
 
     companion object {
+        internal fun some(value: CallbackTestingStructNative): OptionCallbackTestingStructNative {
+            return OptionCallbackTestingStructNative(value, 1)
+        }
+
+        internal fun none(): OptionCallbackTestingStructNative {
+            return OptionCallbackTestingStructNative(CallbackTestingStructNative(), 0)
+        }
+    }
+
+}
+
+class CallbackTestingStruct (var x: Int, var y: Int) {
+    companion object {
+
         internal val libClass: Class<CallbackTestingStructLib> = CallbackTestingStructLib::class.java
-        internal val lib: CallbackTestingStructLib = Native.load("somelib", libClass)
+        internal val lib: CallbackTestingStructLib = Native.load("diplomat_feature_tests", libClass)
         val NATIVESIZE: Long = Native.getNativeSize(CallbackTestingStructNative::class.java).toLong()
+
+        internal fun fromNative(nativeStruct: CallbackTestingStructNative): CallbackTestingStruct {
+            val x: Int = nativeStruct.x
+            val y: Int = nativeStruct.y
+
+            return CallbackTestingStruct(x, y)
+        }
+
+    }
+    internal fun toNative(): CallbackTestingStructNative {
+        var native = CallbackTestingStructNative()
+        native.x = this.x
+        native.y = this.y
+        return native
     }
 
 }

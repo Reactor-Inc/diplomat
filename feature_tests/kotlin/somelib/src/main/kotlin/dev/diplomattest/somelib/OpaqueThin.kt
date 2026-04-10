@@ -17,17 +17,27 @@ class OpaqueThin internal constructor (
     // These ensure that anything that is borrowed is kept alive and not cleaned
     // up by the garbage collector.
     internal val selfEdges: List<Any>,
+    internal var owned: Boolean,
 )  {
 
-    internal class OpaqueThinCleaner(val handle: Pointer, val lib: OpaqueThinLib) : Runnable {
+    init {
+        if (this.owned) {
+            this.registerCleaner()
+        }
+    }
+
+    private class OpaqueThinCleaner(val handle: Pointer, val lib: OpaqueThinLib) : Runnable {
         override fun run() {
             lib.OpaqueThin_destroy(handle)
         }
     }
+    private fun registerCleaner() {
+        CLEANER.register(this, OpaqueThin.OpaqueThinCleaner(handle, OpaqueThin.lib));
+    }
 
     companion object {
         internal val libClass: Class<OpaqueThinLib> = OpaqueThinLib::class.java
-        internal val lib: OpaqueThinLib = Native.load("somelib", libClass)
+        internal val lib: OpaqueThinLib = Native.load("diplomat_feature_tests", libClass)
     }
     
     fun a(): Int {

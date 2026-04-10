@@ -18,31 +18,43 @@ class Locale internal constructor (
     // These ensure that anything that is borrowed is kept alive and not cleaned
     // up by the garbage collector.
     internal val selfEdges: List<Any>,
+    internal var owned: Boolean,
 )  {
 
-    internal class LocaleCleaner(val handle: Pointer, val lib: LocaleLib) : Runnable {
+    init {
+        if (this.owned) {
+            this.registerCleaner()
+        }
+    }
+
+    private class LocaleCleaner(val handle: Pointer, val lib: LocaleLib) : Runnable {
         override fun run() {
             lib.icu4x_Locale_destroy_mv1(handle)
         }
     }
+    private fun registerCleaner() {
+        CLEANER.register(this, Locale.LocaleCleaner(handle, Locale.lib));
+    }
 
     companion object {
         internal val libClass: Class<LocaleLib> = LocaleLib::class.java
-        internal val lib: LocaleLib = Native.load("somelib", libClass)
+        internal val lib: LocaleLib = Native.load("diplomat_example", libClass)
         @JvmStatic
         
         /** Construct an [Locale] from a locale identifier represented as a string.
         */
         fun new_(name: String): Locale {
-            val (nameMem, nameSlice) = PrimitiveArrayTools.borrowUtf8(name)
+            val nameSliceMemory = PrimitiveArrayTools.borrowUtf8(name)
             
-            val returnVal = lib.icu4x_Locale_new_mv1(nameSlice);
-            val selfEdges: List<Any> = listOf()
-            val handle = returnVal 
-            val returnOpaque = Locale(handle, selfEdges)
-            CLEANER.register(returnOpaque, Locale.LocaleCleaner(handle, Locale.lib));
-            if (nameMem != null) nameMem.close()
-            return returnOpaque
+            val returnVal = lib.icu4x_Locale_new_mv1(nameSliceMemory.slice);
+            try {
+                val selfEdges: List<Any> = listOf()
+                val handle = returnVal 
+                val returnOpaque = Locale(handle, selfEdges, true)
+                return returnOpaque
+            } finally {
+                nameSliceMemory.close()
+            }
         }
     }
 

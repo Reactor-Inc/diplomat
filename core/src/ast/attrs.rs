@@ -1,12 +1,12 @@
 //! This module contains utilities for dealing with Rust attributes
 
 use serde::ser::{SerializeStruct, Serializer};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
 use std::convert::Infallible;
 use std::str::FromStr;
 use syn::parse::{Error as ParseError, Parse, ParseStream};
-use syn::{Attribute, Expr, Ident, Lit, LitStr, Meta, MetaList, Token};
+use syn::{Attribute, Expr, Ident, Lit, LitStr, Meta, MetaList, MetaNameValue, Token};
 
 /// The list of attributes on a type. All attributes except `attrs` (HIR attrs) are
 /// potentially read by the diplomat macro and the AST backends, anything that is not should
@@ -30,6 +30,10 @@ pub struct Attrs {
     /// The regular #[cfg()] attributes. Inherited, though the inheritance onto methods is the
     /// only relevant one here.
     pub cfg: Vec<Attribute>,
+
+    /// The #[deprecated(note = 'foo')] attribute.
+    pub deprecated: Option<String>,
+
     /// HIR backend attributes.
     ///
     /// Inherited, but only during lowering. See [`crate::hir::Attrs`] for details on which HIR attributes are inherited.
@@ -49,6 +53,8 @@ pub struct Attrs {
 
     /// For use by [`crate::hir::Attrs::demo_attrs`]
     pub demo_attrs: Vec<DemoBackendAttr>,
+
+    pub(crate) includes: Vec<IncludeAttribute>,
 }
 
 impl Attrs {
@@ -56,8 +62,14 @@ impl Attrs {
         match attr {
             Attr::Cfg(attr) => self.cfg.push(attr),
             Attr::DiplomatBackend(attr) => self.attrs.push(attr),
+            Attr::DiplomatCFGBackend(attr) => self.attrs.push(DiplomatBackendAttr {
+                cfg: DiplomatBackendAttrCfg::Not(Box::new(attr)),
+                meta: Meta::Path(syn::parse_quote!(disable)),
+            }),
             Attr::CRename(rename) => self.abi_rename.extend(&rename),
             Attr::DemoBackend(attr) => self.demo_attrs.push(attr),
+            Attr::Deprecated(msg) => self.deprecated = Some(msg),
+            Attr::Include(inc) => self.includes.push(inc),
         }
     }
 
@@ -85,9 +97,12 @@ impl Attrs {
         Self {
             cfg: self.cfg.clone(),
 
+            deprecated: None,
+
             attrs,
             abi_rename,
             demo_attrs,
+            includes: Vec::new(),
         }
     }
 
@@ -112,16 +127,22 @@ impl From<&[Attribute]> for Attrs {
 enum Attr {
     Cfg(Attribute),
     DiplomatBackend(DiplomatBackendAttr),
+    DiplomatCFGBackend(DiplomatBackendAttrCfg),
     CRename(RenameAttr),
     DemoBackend(DemoBackendAttr),
+    Deprecated(String),
+    Include(IncludeAttribute),
     // More goes here
 }
 
 fn syn_attr_to_ast_attr(attrs: &[Attribute]) -> impl Iterator<Item = Attr> + '_ {
     let cfg_path: syn::Path = syn::parse_str("cfg").unwrap();
     let dattr_path: syn::Path = syn::parse_str("diplomat::attr").unwrap();
+    let diplomat_cfg_path: syn::Path = syn::parse_str("diplomat::cfg").unwrap();
     let crename_attr: syn::Path = syn::parse_str("diplomat::abi_rename").unwrap();
     let demo_path: syn::Path = syn::parse_str("diplomat::demo").unwrap();
+    let include_path: syn::Path = syn::parse_str("diplomat::include").unwrap();
+    let deprecated: syn::Path = syn::parse_str("deprecated").unwrap();
     attrs.iter().filter_map(move |a| {
         if a.path() == &cfg_path {
             Some(Attr::Cfg(a.clone()))
@@ -130,12 +151,39 @@ fn syn_attr_to_ast_attr(attrs: &[Attribute]) -> impl Iterator<Item = Attr> + '_ 
                 a.parse_args()
                     .expect("Failed to parse malformed diplomat::attr"),
             ))
+        } else if a.path() == &diplomat_cfg_path {
+            Some(Attr::DiplomatCFGBackend(
+                a.parse_args()
+                    .expect("Failed to parse malformed diplomat::cfg"),
+            ))
         } else if a.path() == &crename_attr {
             Some(Attr::CRename(RenameAttr::from_meta(&a.meta).unwrap()))
         } else if a.path() == &demo_path {
             Some(Attr::DemoBackend(
                 a.parse_args()
                     .expect("Failed to parse malformed diplomat::demo"),
+            ))
+        } else if a.path() == &deprecated {
+            if let Some(Meta::NameValue(MetaNameValue {
+                value:
+                    syn::Expr::Lit(syn::ExprLit {
+                        lit: Lit::Str(s), ..
+                    }),
+                ..
+            })) = a
+                .meta
+                .require_list()
+                .ok()
+                .and_then(|m| syn::parse2::<Meta>(m.tokens.clone()).ok())
+            {
+                Some(Attr::Deprecated(s.value()))
+            } else {
+                Some(Attr::Deprecated("deprecated".into()))
+            }
+        } else if a.path() == &include_path {
+            Some(Attr::Include(
+                a.parse_args()
+                    .expect("Failed to parse malformed diplomat::include"),
             ))
         } else {
             None
@@ -189,7 +237,7 @@ where
     quote::quote!(#m).to_string().serialize(s)
 }
 
-#[derive(Clone, PartialEq, Eq, Hash, Debug, Serialize)]
+#[derive(Clone, PartialEq, Eq, Hash, Debug, Serialize, Deserialize)]
 #[non_exhaustive]
 pub enum DiplomatBackendAttrCfg {
     Not(Box<DiplomatBackendAttrCfg>),
@@ -447,6 +495,18 @@ impl<'a> StandardAttribute<'a> {
                 }
             }
         }
+    }
+}
+
+#[derive(Clone, PartialEq, Eq, Hash, Debug, Default)]
+pub(crate) struct IncludeAttribute {
+    pub(crate) path: String,
+}
+
+impl Parse for IncludeAttribute {
+    fn parse(input: ParseStream) -> syn::Result<Self> {
+        let st = input.parse::<LitStr>()?;
+        Ok(Self { path: st.value() })
     }
 }
 

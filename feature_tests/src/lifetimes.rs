@@ -38,7 +38,7 @@ pub mod ffi {
         }
 
         #[diplomat::attr(auto, named_constructor = "static")]
-        #[diplomat::attr(not(supports = static_slices), disable)]
+        #[diplomat::cfg(supports = static_slices)]
         pub fn new_static(x: &'static DiplomatStr) -> Box<Self> {
             Box::new(Foo(x))
         }
@@ -54,6 +54,7 @@ pub mod ffi {
             Box::new(Foo(fields.b.into()))
         }
 
+        // Don't yet support borrowing from slices
         #[diplomat::attr(auto, named_constructor)]
         /// Test that the extraction logic correctly pins the right fields
         pub fn extract_from_bounds<'x, 'y: 'x + 'a, 'z: 'x + 'y>(
@@ -319,7 +320,7 @@ pub mod ffi {
         }
     }
 
-    #[diplomat::opaque]
+    #[diplomat::opaque_mut]
     pub struct OpaqueThinIter<'a>(pub std::slice::Iter<'a, crate::lifetimes::Internal>);
 
     impl<'a> OpaqueThinIter<'a> {

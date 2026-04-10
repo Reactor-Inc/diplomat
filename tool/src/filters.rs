@@ -1,18 +1,31 @@
 use core::fmt;
 use core::fmt::Write;
 
+use askama::Values;
+
 /// Indent all but the nonempty lines
-pub(crate) fn indent_trimmed(s: impl fmt::Display, width: usize) -> Result<String, fmt::Error> {
+#[askama::filter_fn]
+pub(crate) fn indent_trimmed(
+    s: impl fmt::Display,
+    values: &dyn Values,
+    width: usize,
+) -> Result<String, fmt::Error> {
     let mut indented = String::new();
     for _ in 0..width {
         indented.push(' ');
     }
 
-    prefix_trimmed(s, &indented)
+    let p: prefix_trimmed<'_, true> = prefix_trimmed::default().with_prefix(&indented);
+    prefix_trimmed::execute(p, s, values)
 }
 
 /// Apply a prefix to each line, trimming trailing whitespace
-pub(crate) fn prefix_trimmed(s: impl fmt::Display, prefix: &str) -> Result<String, fmt::Error> {
+#[askama::filter_fn]
+pub(crate) fn prefix_trimmed(
+    s: impl fmt::Display,
+    _values: &dyn Values,
+    prefix: &str,
+) -> Result<String, fmt::Error> {
     let s = s.to_string();
     let mut result = String::new();
     let prefix_trimmed = prefix.trim_end();

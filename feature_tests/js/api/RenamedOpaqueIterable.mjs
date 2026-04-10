@@ -36,6 +36,19 @@ export class RenamedOpaqueIterable {
     }
 
 
+    #defaultConstructor(size) {
+
+        const result = wasm.namespace_OpaqueIterable_new(size);
+
+        try {
+            return new RenamedOpaqueIterable(diplomatRuntime.internalConstructor, result, []);
+        }
+
+        finally {
+            diplomatRuntime.FUNCTION_PARAM_ALLOC.clean();
+        }
+    }
+
     [Symbol.iterator]() {
         // This lifetime edge depends on lifetimes 'a
         let aEdges = [this];
@@ -48,10 +61,17 @@ export class RenamedOpaqueIterable {
         }
 
         finally {
+            diplomatRuntime.FUNCTION_PARAM_ALLOC.clean();
         }
     }
 
-    constructor(symbol, ptr, selfEdge) {
-        return this.#internalConstructor(...arguments)
+    constructor(size) {
+        if (arguments[0] === diplomatRuntime.exposeConstructor) {
+            return this.#internalConstructor(...Array.prototype.slice.call(arguments, 1));
+        } else if (arguments[0] === diplomatRuntime.internalConstructor) {
+            return this.#internalConstructor(...arguments);
+        } else {
+            return this.#defaultConstructor(...arguments);
+        }
     }
 }

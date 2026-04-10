@@ -25,25 +25,62 @@ internal class OptionStructNative: Structure(), Structure.ByValue {
     }
 }
 
-class OptionStruct internal constructor (
-    internal val nativeStruct: OptionStructNative) {
-    val a: OptionOpaque? = if (nativeStruct.a == null) {
-        null
-    } else {
-        OptionOpaque(nativeStruct.a!!, listOf())
+
+
+
+internal class OptionOptionStructNative constructor(): Structure(), Structure.ByValue {
+    @JvmField
+    internal var value: OptionStructNative = OptionStructNative()
+
+    @JvmField
+    internal var isOk: Byte = 0
+
+    // Define the fields of the struct
+    override fun getFieldOrder(): List<String> {
+        return listOf("value", "isOk")
     }
-    val b: OptionOpaqueChar? = if (nativeStruct.b == null) {
-        null
-    } else {
-        OptionOpaqueChar(nativeStruct.b!!, listOf())
+
+    internal fun option(): OptionStructNative? {
+        if (isOk == 1.toByte()) {
+            return value
+        } else {
+            return null
+        }
     }
-    val c: UInt = nativeStruct.c.toUInt()
-    val d: OptionOpaque = OptionOpaque(nativeStruct.d, listOf())
+
+
+    constructor(value: OptionStructNative, isOk: Byte): this() {
+        this.value = value
+        this.isOk = isOk
+    }
 
     companion object {
-        internal val libClass: Class<OptionStructLib> = OptionStructLib::class.java
-        internal val lib: OptionStructLib = Native.load("somelib", libClass)
-        val NATIVESIZE: Long = Native.getNativeSize(OptionStructNative::class.java).toLong()
+        internal fun some(value: OptionStructNative): OptionOptionStructNative {
+            return OptionOptionStructNative(value, 1)
+        }
+
+        internal fun none(): OptionOptionStructNative {
+            return OptionOptionStructNative(OptionStructNative(), 0)
+        }
     }
 
+}
+
+class OptionStruct (var a: OptionOpaque?, var b: OptionOpaqueChar?, var c: UInt, var d: OptionOpaque) {
+    companion object {
+
+        internal val libClass: Class<OptionStructLib> = OptionStructLib::class.java
+        internal val lib: OptionStructLib = Native.load("diplomat_feature_tests", libClass)
+        val NATIVESIZE: Long = Native.getNativeSize(OptionStructNative::class.java).toLong()
+
+        internal fun fromNative(nativeStruct: OptionStructNative): OptionStruct {
+            val a: OptionOpaque? = nativeStruct.a?.let { OptionOpaque(it, listOf(), true) }
+            val b: OptionOpaqueChar? = nativeStruct.b?.let { OptionOpaqueChar(it, listOf(), true) }
+            val c: UInt = nativeStruct.c.toUInt()
+            val d: OptionOpaque = OptionOpaque(nativeStruct.d, listOf(), true)
+
+            return OptionStruct(a, b, c, d)
+        }
+
+    }
 }

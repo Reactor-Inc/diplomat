@@ -3,12 +3,12 @@ pub mod ffi {
     use diplomat_runtime::{DiplomatStr, DiplomatStrSlice, DiplomatWrite};
     use std::fmt::Write as _;
 
-    #[diplomat::opaque]
+    #[diplomat::opaque_mut]
     pub struct MyString(String);
 
     impl MyString {
         #[diplomat::attr(auto, constructor)]
-        pub fn new(v: &DiplomatStr) -> Box<MyString> {
+        pub fn new(#[diplomat::attr(auto, default_value = 'T')] v: &DiplomatStr) -> Box<MyString> {
             Box::new(Self(String::from_utf8(v.to_owned()).unwrap()))
         }
 
@@ -17,6 +17,7 @@ pub mod ffi {
             Box::new(Self(v.to_string()))
         }
 
+        #[diplomat::cfg(supports=owned_slices)]
         pub fn new_owned(v: Box<DiplomatStr>) -> Box<MyString> {
             Box::new(Self(String::from_utf8(v.into()).unwrap()))
         }
@@ -49,11 +50,11 @@ pub mod ffi {
         }
     }
 
-    #[diplomat::opaque]
+    #[diplomat::opaque_mut]
     struct Float64Vec(Vec<f64>);
 
     impl Float64Vec {
-        #[diplomat::attr(not(supports = memory_sharing), disable)]
+        #[diplomat::cfg(supports = memory_sharing)]
         pub fn new(v: &[f64]) -> Box<Float64Vec> {
             Box::new(Self(v.to_vec()))
         }
@@ -92,7 +93,7 @@ pub mod ffi {
             ))
         }
 
-        #[diplomat::attr(supports = memory_sharing, disable)]
+        #[diplomat::attr(any(supports = memory_sharing, not(supports = owned_slices)), disable)]
         #[diplomat::attr(auto, constructor)]
         pub fn new_from_owned(v: Box<[f64]>) -> Box<Float64Vec> {
             Box::new(Self(v.into()))
@@ -103,6 +104,7 @@ pub mod ffi {
             &self.0
         }
 
+        #[diplomat::cfg(supports=mutable_slices)]
         pub fn fill_slice(&self, v: &mut [f64]) {
             v.copy_from_slice(&self.0)
         }
@@ -129,11 +131,11 @@ pub mod ffi {
 
     // For testing throwing IndexError:
     #[diplomat::opaque]
-    #[diplomat::attr(not(nanobind), disable)]
+    #[diplomat::cfg(nanobind)]
     struct Float64VecError(Vec<f64>);
 
     impl Float64VecError {
-        #[diplomat::attr(not(supports = memory_sharing), disable)]
+        #[diplomat::cfg(supports = memory_sharing)]
         pub fn new(v: &[f64]) -> Box<Float64VecError> {
             Box::new(Self(v.to_vec()))
         }

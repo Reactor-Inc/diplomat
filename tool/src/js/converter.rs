@@ -10,7 +10,7 @@ use diplomat_core::hir::{
 };
 use std::fmt::Write;
 
-use super::gen::TyGenContext;
+use super::gen::ItemGenContext;
 
 /// Context about a struct being borrowed when doing js-to-c conversions
 /// Borrowed from dart implementation.
@@ -38,7 +38,7 @@ pub(super) enum JsToCConversionContext {
     WriteToBuffer(&'static str, usize),
 }
 
-impl<'tcx> TyGenContext<'_, 'tcx> {
+impl<'tcx> ItemGenContext<'_, 'tcx> {
     // #region C to JS
     /// Given a type from Rust, convert it into something Typescript will understand.
     /// We use this to double-check our Javascript work as well.
@@ -570,7 +570,7 @@ impl<'tcx> TyGenContext<'_, 'tcx> {
 
     /// Given an [`hir::SelfType`] type, generate JS code that will turn this into something WASM can understand.
     ///
-    /// Should ONLY be called for generation from within methods ([`TyGenContext::generate_method`]), see SelfType::Struct generation for reasons why.
+    /// Should ONLY be called for generation from within methods ([`ItemGenContext::generate_method`]), see SelfType::Struct generation for reasons why.
     pub(super) fn gen_js_to_c_self(
         &self,
         gen_context: JsToCConversionContext,
@@ -726,10 +726,18 @@ impl<'tcx> TyGenContext<'_, 'tcx> {
                                 _ => "string8",
                             }
                         ),
-                        hir::Slice::Primitive(_, p) => format!(
-                            r#"{spread_pre}{alloc_stmnt}diplomatRuntime.DiplomatBuf.slice(wasm, {js_name}, "{}"){alloc_end}{spread_post}"#,
-                            self.formatter.fmt_primitive_list_view(*p)
-                        ),
+                        hir::Slice::Primitive(mt, p) => {
+                            match mt {
+                                hir::MaybeOwn::Borrow(b) if b.mutability.is_mutable() => {
+                                    self.errors.push_error("Diplomat JS does not support mutable slices.".to_string());
+                                }
+                                _ => {}
+                            }
+                            format!(
+                                r#"{spread_pre}{alloc_stmnt}diplomatRuntime.DiplomatBuf.slice(wasm, {js_name}, "{}"){alloc_end}{spread_post}"#,
+                                self.formatter.fmt_primitive_list_view(*p)
+                            )
+                        }
                         _ => unreachable!("Unknown Slice variant {ty:?}"),
                     }
                     .into()
@@ -781,7 +789,7 @@ impl<'tcx> TyGenContext<'_, 'tcx> {
 
         match gen_context {
             JsToCConversionContext::List => format!(
-                "{js_call}._intoFFI({allocator}, {{{params}}}, false)"
+                "{js_call}._intoFFI(diplomatRuntime.FUNCTION_PARAM_ALLOC.alloc({js_type}._sizeBytes), functionCleanupArena, {{{params}}}, false)"
             ).into(),
             JsToCConversionContext::WriteToBuffer(offset_var, offset) => format!(
                 "{js_call}._writeToArrayBuffer(arrayBuffer, {offset_var} + {offset}, {allocator}, {{{params}}})"

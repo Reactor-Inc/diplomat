@@ -23,67 +23,82 @@ class MyString internal constructor (
     // These ensure that anything that is borrowed is kept alive and not cleaned
     // up by the garbage collector.
     internal val selfEdges: List<Any>,
+    internal var owned: Boolean,
 )  {
 
-    internal class MyStringCleaner(val handle: Pointer, val lib: MyStringLib) : Runnable {
+    init {
+        if (this.owned) {
+            this.registerCleaner()
+        }
+    }
+
+    private class MyStringCleaner(val handle: Pointer, val lib: MyStringLib) : Runnable {
         override fun run() {
             lib.MyString_destroy(handle)
         }
     }
+    private fun registerCleaner() {
+        CLEANER.register(this, MyString.MyStringCleaner(handle, MyString.lib));
+    }
 
     companion object {
         internal val libClass: Class<MyStringLib> = MyStringLib::class.java
-        internal val lib: MyStringLib = Native.load("somelib", libClass)
+        internal val lib: MyStringLib = Native.load("diplomat_feature_tests", libClass)
         @JvmStatic
         
         fun new_(v: String): MyString {
-            val (vMem, vSlice) = PrimitiveArrayTools.borrowUtf8(v)
+            val vSliceMemory = PrimitiveArrayTools.borrowUtf8(v)
             
-            val returnVal = lib.MyString_new(vSlice);
-            val selfEdges: List<Any> = listOf()
-            val handle = returnVal 
-            val returnOpaque = MyString(handle, selfEdges)
-            CLEANER.register(returnOpaque, MyString.MyStringCleaner(handle, MyString.lib));
-            if (vMem != null) vMem.close()
-            return returnOpaque
+            val returnVal = lib.MyString_new(vSliceMemory.slice);
+            try {
+                val selfEdges: List<Any> = listOf()
+                val handle = returnVal 
+                val returnOpaque = MyString(handle, selfEdges, true)
+                return returnOpaque
+            } finally {
+                vSliceMemory.close()
+            }
         }
         @JvmStatic
         
         fun newUnsafe(v: String): MyString {
-            val (vMem, vSlice) = PrimitiveArrayTools.borrowUtf8(v)
+            val vSliceMemory = PrimitiveArrayTools.borrowUtf8(v)
             
-            val returnVal = lib.MyString_new_unsafe(vSlice);
-            val selfEdges: List<Any> = listOf()
-            val handle = returnVal 
-            val returnOpaque = MyString(handle, selfEdges)
-            CLEANER.register(returnOpaque, MyString.MyStringCleaner(handle, MyString.lib));
-            if (vMem != null) vMem.close()
-            return returnOpaque
+            val returnVal = lib.MyString_new_unsafe(vSliceMemory.slice);
+            try {
+                val selfEdges: List<Any> = listOf()
+                val handle = returnVal 
+                val returnOpaque = MyString(handle, selfEdges, true)
+                return returnOpaque
+            } finally {
+                vSliceMemory.close()
+            }
         }
         @JvmStatic
         
         fun newOwned(v: String): MyString {
-            val (vMem, vSlice) = PrimitiveArrayTools.moveUtf8(v)
+            val vSliceMemory = PrimitiveArrayTools.moveUtf8(v)
             
-            val returnVal = lib.MyString_new_owned(vSlice);
+            val returnVal = lib.MyString_new_owned(vSliceMemory.slice);
             val selfEdges: List<Any> = listOf()
             val handle = returnVal 
-            val returnOpaque = MyString(handle, selfEdges)
-            CLEANER.register(returnOpaque, MyString.MyStringCleaner(handle, MyString.lib));
+            val returnOpaque = MyString(handle, selfEdges, true)
             return returnOpaque
         }
         @JvmStatic
         
         fun newFromFirst(v: Array<String>): MyString {
-            val (vMem, vSlice) = PrimitiveArrayTools.borrowUtf8s(v)
+            val vSliceMemory = PrimitiveArrayTools.borrowUtf8s(v)
             
-            val returnVal = lib.MyString_new_from_first(vSlice);
-            val selfEdges: List<Any> = listOf()
-            val handle = returnVal 
-            val returnOpaque = MyString(handle, selfEdges)
-            CLEANER.register(returnOpaque, MyString.MyStringCleaner(handle, MyString.lib));
-            vMem.forEach {if (it != null) it.close()}
-            return returnOpaque
+            val returnVal = lib.MyString_new_from_first(vSliceMemory.slice);
+            try {
+                val selfEdges: List<Any> = listOf()
+                val handle = returnVal 
+                val returnOpaque = MyString(handle, selfEdges, true)
+                return returnOpaque
+            } finally {
+                vSliceMemory.close()
+            }
         }
         @JvmStatic
         
@@ -95,20 +110,28 @@ class MyString internal constructor (
         @JvmStatic
         
         fun stringTransform(foo: String): String {
-            val (fooMem, fooSlice) = PrimitiveArrayTools.borrowUtf8(foo)
+            val fooSliceMemory = PrimitiveArrayTools.borrowUtf8(foo)
             val write = DW.lib.diplomat_buffer_write_create(0)
-            val returnVal = lib.MyString_string_transform(fooSlice, write);
-            
-            val returnString = DW.writeToString(write)
-            return returnString
+            val returnVal = lib.MyString_string_transform(fooSliceMemory.slice, write);
+            try {
+                
+                val returnString = DW.writeToString(write)
+                return returnString
+            } finally {
+                fooSliceMemory.close()
+            }
         }
     }
     
     fun setStr(newStr: String): Unit {
-        val (newStrMem, newStrSlice) = PrimitiveArrayTools.borrowUtf8(newStr)
+        val newStrSliceMemory = PrimitiveArrayTools.borrowUtf8(newStr)
         
-        val returnVal = lib.MyString_set_str(handle, newStrSlice);
-        
+        val returnVal = lib.MyString_set_str(handle, newStrSliceMemory.slice);
+        try {
+            
+        } finally {
+            newStrSliceMemory.close()
+        }
     }
     
     fun getStr(): String {
@@ -120,6 +143,8 @@ class MyString internal constructor (
     }
     
     fun borrow(): String {
+        // This lifetime edge depends on lifetimes: 'a
+        val aEdges: MutableList<Any> = mutableListOf(this);
         
         val returnVal = lib.MyString_borrow(handle);
             return PrimitiveArrayTools.getUtf8(returnVal)

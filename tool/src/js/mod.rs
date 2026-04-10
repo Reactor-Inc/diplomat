@@ -14,7 +14,7 @@ pub(crate) mod formatter;
 use formatter::JSFormatter;
 
 mod gen;
-use gen::{MethodsInfo, TyGenContext};
+use gen::{ItemGenContext, MethodsInfo};
 use serde::{Deserialize, Serialize};
 mod converter;
 
@@ -39,7 +39,9 @@ impl FileType {
 pub struct JsConfig {}
 
 impl JsConfig {
-    pub fn set(&mut self, _key: &str, _value: toml::Value) {}
+    pub fn set(&mut self, key: &str, _value: toml::Value) {
+        panic!("JS does not support any backend-specific configs, found {key}");
+    }
 }
 
 pub(crate) fn attr_support() -> BackendAttrSupport {
@@ -70,6 +72,7 @@ pub(crate) fn attr_support() -> BackendAttrSupport {
     a.traits_are_send = false;
     a.traits_are_sync = false;
     a.generate_mocking_interface = false;
+    a.owned_slices = true;
 
     a
 }
@@ -98,6 +101,9 @@ pub(crate) fn run<'tcx>(
         include_str!("../../templates/js/wasm.mjs").into(),
     );
 
+    // The size of the largest struct we have to pass into a function, ever.
+    let mut function_alloc_max: usize = 0;
+
     for (id, ty) in tcx.all_types() {
         let _guard = errors.set_context_ty(ty.name().as_str().into());
 
@@ -111,7 +117,7 @@ pub(crate) fn run<'tcx>(
 
         let type_name = formatter.fmt_type_name(id);
 
-        let context = TyGenContext {
+        let context = ItemGenContext {
             tcx,
             type_name,
             formatter: &formatter,
@@ -146,12 +152,13 @@ pub(crate) fn run<'tcx>(
         let methods = m
             .iter()
             .flat_map(|method| {
-                let inf = context.generate_method(id, method);
-                if inf.is_some() {
+                let inf = context.generate_method(method);
+                if let Some(inf) = inf.clone() {
+                    function_alloc_max = std::cmp::max(function_alloc_max, inf.max_alloc);
                     if let Some(diplomat_core::hir::SpecialMethod::Constructor) =
                         method.attrs.special_method
                     {
-                        special_methods.constructor.replace(inf.clone().unwrap());
+                        special_methods.constructor.replace(inf);
                     }
                 }
                 inf
@@ -232,11 +239,13 @@ pub(crate) fn run<'tcx>(
     struct IndexTemplate<'a> {
         exports: &'a Vec<Cow<'a, str>>,
         typescript: bool,
+        max_size: usize,
     }
 
     let mut out_index = IndexTemplate {
         exports: &exports,
         typescript: false,
+        max_size: function_alloc_max,
     };
 
     files.add_file("index.mjs".into(), out_index.render().unwrap());

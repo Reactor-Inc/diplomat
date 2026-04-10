@@ -8,6 +8,11 @@ const AttrOpaque1Renamed_box_destroy_registry = new FinalizationRegistry((ptr) =
     wasm.namespace_AttrOpaque1_destroy(ptr);
 });
 
+/**
+ * Some example docs
+ * Some JS example docs
+ * Back to all docs
+ */
 export class AttrOpaque1Renamed {
     // Internal ptr reference:
     #ptr = null;
@@ -37,6 +42,9 @@ export class AttrOpaque1Renamed {
     }
 
 
+    /**
+     * More example docs
+     */
     #defaultConstructor() {
 
         const result = wasm.namespace_AttrOpaque1_new();
@@ -46,6 +54,7 @@ export class AttrOpaque1Renamed {
         }
 
         finally {
+            diplomatRuntime.FUNCTION_PARAM_ALLOC.clean();
         }
     }
 
@@ -58,6 +67,7 @@ export class AttrOpaque1Renamed {
         }
 
         finally {
+            diplomatRuntime.FUNCTION_PARAM_ALLOC.clean();
         }
     }
 
@@ -70,6 +80,7 @@ export class AttrOpaque1Renamed {
         }
 
         finally {
+            diplomatRuntime.FUNCTION_PARAM_ALLOC.clean();
         }
     }
 
@@ -82,6 +93,7 @@ export class AttrOpaque1Renamed {
         }
 
         finally {
+            diplomatRuntime.FUNCTION_PARAM_ALLOC.clean();
         }
     }
 
@@ -94,6 +106,7 @@ export class AttrOpaque1Renamed {
         }
 
         finally {
+            diplomatRuntime.FUNCTION_PARAM_ALLOC.clean();
         }
     }
 
@@ -103,6 +116,7 @@ export class AttrOpaque1Renamed {
         try {}
 
         finally {
+            diplomatRuntime.FUNCTION_PARAM_ALLOC.clean();
         }
     }
 
@@ -112,9 +126,13 @@ export class AttrOpaque1Renamed {
         try {}
 
         finally {
+            diplomatRuntime.FUNCTION_PARAM_ALLOC.clean();
         }
     }
 
+    /**
+     * More example docs
+     */
     constructor() {
         if (arguments[0] === diplomatRuntime.exposeConstructor) {
             return this.#internalConstructor(...Array.prototype.slice.call(arguments, 1));

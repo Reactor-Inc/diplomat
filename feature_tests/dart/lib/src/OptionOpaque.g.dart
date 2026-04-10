@@ -85,14 +85,14 @@ final class OptionOpaque implements ffi.Finalizable {
 
   OptionOpaque? returnsNoneSelf() {
     // This lifetime edge depends on lifetimes: 'a
-    core.List<Object> aEdges = [this];
+    final aEdges = [this];
     final result = _OptionOpaque_returns_none_self(_ffi);
     return result.address == 0 ? null : OptionOpaque._fromFfi(result, aEdges);
   }
 
   OptionOpaque? returnsSomeSelf() {
     // This lifetime edge depends on lifetimes: 'a
-    core.List<Object> aEdges = [this];
+    final aEdges = [this];
     final result = _OptionOpaque_returns_some_self(_ffi);
     return result.address == 0 ? null : OptionOpaque._fromFfi(result, aEdges);
   }
@@ -116,6 +116,19 @@ final class OptionOpaque implements ffi.Finalizable {
 
   static OptionEnum? acceptsOptionEnum(int sentinel, [OptionEnum? arg]) {
     final result = _OptionOpaque_accepts_option_enum(arg != null ? _ResultInt32Void.ok(arg.index) : _ResultInt32Void.err(), sentinel);
+    if (!result.isOk) {
+      return null;
+    }
+    return OptionEnum.values[result.union.ok];
+  }
+
+  static void acceptsBorrowingOptionStruct(BorrowingOptionStruct arg) {
+    final temp = _FinalizedArena();
+    _OptionOpaque_accepts_borrowing_option_struct(arg._toFfi(temp.arena));
+  }
+
+  static OptionEnum? acceptsMultipleOptionEnum(int sentinel1, int sentinel2, {OptionEnum? arg1, OptionEnum? arg2, OptionEnum? arg3}) {
+    final result = _OptionOpaque_accepts_multiple_option_enum(sentinel1, arg1 != null ? _ResultInt32Void.ok(arg1.index) : _ResultInt32Void.err(), arg2 != null ? _ResultInt32Void.ok(arg2.index) : _ResultInt32Void.err(), arg3 != null ? _ResultInt32Void.ok(arg3.index) : _ResultInt32Void.err(), sentinel2);
     if (!result.isOk) {
       return null;
     }
@@ -217,6 +230,16 @@ external _ResultUint8Void _OptionOpaque_accepts_option_u8(_ResultUint8Void arg, 
 @ffi.Native<_ResultInt32Void Function(_ResultInt32Void, ffi.Uint8)>(isLeaf: true, symbol: 'OptionOpaque_accepts_option_enum')
 // ignore: non_constant_identifier_names
 external _ResultInt32Void _OptionOpaque_accepts_option_enum(_ResultInt32Void arg, int sentinel);
+
+@_DiplomatFfiUse('OptionOpaque_accepts_borrowing_option_struct')
+@ffi.Native<ffi.Void Function(_BorrowingOptionStructFfi)>(isLeaf: true, symbol: 'OptionOpaque_accepts_borrowing_option_struct')
+// ignore: non_constant_identifier_names
+external void _OptionOpaque_accepts_borrowing_option_struct(_BorrowingOptionStructFfi arg);
+
+@_DiplomatFfiUse('OptionOpaque_accepts_multiple_option_enum')
+@ffi.Native<_ResultInt32Void Function(ffi.Uint8, _ResultInt32Void, _ResultInt32Void, _ResultInt32Void, ffi.Uint8)>(isLeaf: true, symbol: 'OptionOpaque_accepts_multiple_option_enum')
+// ignore: non_constant_identifier_names
+external _ResultInt32Void _OptionOpaque_accepts_multiple_option_enum(int sentinel1, _ResultInt32Void arg1, _ResultInt32Void arg2, _ResultInt32Void arg3, int sentinel2);
 
 @_DiplomatFfiUse('OptionOpaque_accepts_option_input_struct')
 @ffi.Native<_ResultOptionInputStructFfiVoid Function(_ResultOptionInputStructFfiVoid, ffi.Uint8)>(isLeaf: true, symbol: 'OptionOpaque_accepts_option_input_struct')

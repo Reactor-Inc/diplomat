@@ -21,54 +21,63 @@ class Foo internal constructor (
     // up by the garbage collector.
     internal val selfEdges: List<Any>,
     internal val aEdges: List<Any?>,
+    internal var owned: Boolean,
 )  {
 
-    internal class FooCleaner(val handle: Pointer, val lib: FooLib) : Runnable {
+    init {
+        if (this.owned) {
+            this.registerCleaner()
+        }
+    }
+
+    private class FooCleaner(val handle: Pointer, val lib: FooLib) : Runnable {
         override fun run() {
             lib.Foo_destroy(handle)
         }
     }
+    private fun registerCleaner() {
+        CLEANER.register(this, Foo.FooCleaner(handle, Foo.lib));
+    }
 
     companion object {
         internal val libClass: Class<FooLib> = FooLib::class.java
-        internal val lib: FooLib = Native.load("somelib", libClass)
+        internal val lib: FooLib = Native.load("diplomat_feature_tests", libClass)
         @JvmStatic
         
         fun new_(x: String): Foo {
-            val (xMem, xSlice) = PrimitiveArrayTools.borrowUtf8(x)
+            // This lifetime edge depends on lifetimes: 'a
+            val aEdges: MutableList<Any> = mutableListOf();
+            val xSliceMemory = PrimitiveArrayTools.borrowUtf8(x).into(listOf(aEdges))
             
-            val returnVal = lib.Foo_new(xSlice);
+            val returnVal = lib.Foo_new(xSliceMemory.slice);
             val selfEdges: List<Any> = listOf()
-            val aEdges: List<Any?> = listOf(xMem)
             val handle = returnVal 
-            val returnOpaque = Foo(handle, selfEdges, aEdges)
-            CLEANER.register(returnOpaque, Foo.FooCleaner(handle, Foo.lib));
+            val returnOpaque = Foo(handle, selfEdges, aEdges, true)
             return returnOpaque
         }
         @JvmStatic
         
         fun newStatic(x: String): Foo {
-            val (xMem, xSlice) = PrimitiveArrayTools.borrowUtf8(x)
+            // This lifetime edge depends on lifetimes: 'a
+            val aEdges: MutableList<Any> = mutableListOf();
+            val xSliceMemory = PrimitiveArrayTools.borrowUtf8(x).leakStatic()
             
-            val returnVal = lib.Foo_new_static(xSlice);
+            val returnVal = lib.Foo_new_static(xSliceMemory.slice);
             val selfEdges: List<Any> = listOf()
-            val aEdges: List<Any?> = listOf()
             val handle = returnVal 
-            val returnOpaque = Foo(handle, selfEdges, aEdges)
-            CLEANER.register(returnOpaque, Foo.FooCleaner(handle, Foo.lib));
-            if (xMem != null) xMem.close()
+            val returnOpaque = Foo(handle, selfEdges, aEdges, true)
             return returnOpaque
         }
         @JvmStatic
         
         fun extractFromFields(fields: BorrowedFields): Foo {
+            // This lifetime edge depends on lifetimes: 'a
+            val aEdges: MutableList<Any> = mutableListOf();
             
-            val returnVal = lib.Foo_extract_from_fields(fields.nativeStruct);
+            val returnVal = lib.Foo_extract_from_fields(fields.toNative(aAppendArray = arrayOf(aEdges)));
             val selfEdges: List<Any> = listOf()
-            val aEdges: List<Any?> = fields.aEdges
             val handle = returnVal 
-            val returnOpaque = Foo(handle, selfEdges, aEdges)
-            CLEANER.register(returnOpaque, Foo.FooCleaner(handle, Foo.lib));
+            val returnOpaque = Foo(handle, selfEdges, aEdges, true)
             return returnOpaque
         }
         @JvmStatic
@@ -76,36 +85,38 @@ class Foo internal constructor (
         /** Test that the extraction logic correctly pins the right fields
         */
         fun extractFromBounds(bounds: BorrowedFieldsWithBounds, anotherString: String): Foo {
-            val (anotherStringMem, anotherStringSlice) = PrimitiveArrayTools.borrowUtf8(anotherString)
+            val temporaryEdgeArena: MutableList<Any> = mutableListOf()
+            // This lifetime edge depends on lifetimes: 'a, 'y, 'z
+            val aEdges: MutableList<Any> = mutableListOf();
+            val anotherStringSliceMemory = PrimitiveArrayTools.borrowUtf8(anotherString).into(listOf(aEdges))
             
-            val returnVal = lib.Foo_extract_from_bounds(bounds.nativeStruct, anotherStringSlice);
+            val returnVal = lib.Foo_extract_from_bounds(bounds.toNative(aAppendArray = arrayOf(temporaryEdgeArena), bAppendArray = arrayOf(aEdges), cAppendArray = arrayOf(aEdges)), anotherStringSliceMemory.slice);
             val selfEdges: List<Any> = listOf()
-            val aEdges: List<Any?> = bounds.bEdges + bounds.cEdges + listOf(anotherStringMem)
             val handle = returnVal 
-            val returnOpaque = Foo(handle, selfEdges, aEdges)
-            CLEANER.register(returnOpaque, Foo.FooCleaner(handle, Foo.lib));
+            val returnOpaque = Foo(handle, selfEdges, aEdges, true)
             return returnOpaque
         }
     }
     
     fun getBar(): Bar {
+        // This lifetime edge depends on lifetimes: 'a
+        val aEdges: MutableList<Any> = mutableListOf(this);
+        // This lifetime edge depends on lifetimes: 'a, 'b
+        val bEdges: MutableList<Any> = mutableListOf(this);
         
         val returnVal = lib.Foo_get_bar(handle);
         val selfEdges: List<Any> = listOf()
-        val bEdges: List<Any?> = listOf(this)
-        val aEdges: List<Any?> = listOf(this)
         val handle = returnVal 
-        val returnOpaque = Bar(handle, selfEdges, bEdges, aEdges)
-        CLEANER.register(returnOpaque, Bar.BarCleaner(handle, Bar.lib));
+        val returnOpaque = Bar(handle, selfEdges, bEdges, aEdges, true)
         return returnOpaque
     }
     
     fun asReturning(): BorrowedFieldsReturning {
+        // This lifetime edge depends on lifetimes: 'a
+        val aEdges: MutableList<Any> = mutableListOf(this);
         
         val returnVal = lib.Foo_as_returning(handle);
-        
-        val aEdges: List<Any?> = listOf(this)
-        val returnStruct = BorrowedFieldsReturning(returnVal, aEdges)
+        val returnStruct = BorrowedFieldsReturning.fromNative(returnVal, aEdges)
         return returnStruct
     }
 

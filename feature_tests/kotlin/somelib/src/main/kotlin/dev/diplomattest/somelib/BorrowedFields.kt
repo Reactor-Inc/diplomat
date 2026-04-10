@@ -24,30 +24,84 @@ internal class BorrowedFieldsNative: Structure(), Structure.ByValue {
     }
 }
 
-class BorrowedFields internal constructor (
-    internal val nativeStruct: BorrowedFieldsNative,
-    internal val aEdges: List<Any?>
-    ) {
-    val a: String = PrimitiveArrayTools.getUtf16(nativeStruct.a)
-    val b: String = PrimitiveArrayTools.getUtf8(nativeStruct.b)
-    val c: String = PrimitiveArrayTools.getUtf8(nativeStruct.c)
 
-    companion object {
-        internal val libClass: Class<BorrowedFieldsLib> = BorrowedFieldsLib::class.java
-        internal val lib: BorrowedFieldsLib = Native.load("somelib", libClass)
-        val NATIVESIZE: Long = Native.getNativeSize(BorrowedFieldsNative::class.java).toLong()
-        @JvmStatic
-        
-        fun fromBarAndStrings(bar: Bar, dstr16: String, utf8Str: String): BorrowedFields {
-            val (dstr16Mem, dstr16Slice) = PrimitiveArrayTools.borrowUtf16(dstr16)
-            val (utf8StrMem, utf8StrSlice) = PrimitiveArrayTools.borrowUtf8(utf8Str)
-            
-            val returnVal = lib.BorrowedFields_from_bar_and_strings(bar.handle, dstr16Slice, utf8StrSlice);
-            
-            val xEdges: List<Any?> = listOf(bar) + listOf(dstr16Mem) + listOf(utf8StrMem)
-            val returnStruct = BorrowedFields(returnVal, xEdges)
-            return returnStruct
+
+
+internal class OptionBorrowedFieldsNative constructor(): Structure(), Structure.ByValue {
+    @JvmField
+    internal var value: BorrowedFieldsNative = BorrowedFieldsNative()
+
+    @JvmField
+    internal var isOk: Byte = 0
+
+    // Define the fields of the struct
+    override fun getFieldOrder(): List<String> {
+        return listOf("value", "isOk")
+    }
+
+    internal fun option(): BorrowedFieldsNative? {
+        if (isOk == 1.toByte()) {
+            return value
+        } else {
+            return null
         }
     }
 
+
+    constructor(value: BorrowedFieldsNative, isOk: Byte): this() {
+        this.value = value
+        this.isOk = isOk
+    }
+
+    companion object {
+        internal fun some(value: BorrowedFieldsNative): OptionBorrowedFieldsNative {
+            return OptionBorrowedFieldsNative(value, 1)
+        }
+
+        internal fun none(): OptionBorrowedFieldsNative {
+            return OptionBorrowedFieldsNative(BorrowedFieldsNative(), 0)
+        }
+    }
+
+}
+
+class BorrowedFields (var a: String, var b: String, var c: String) {
+    companion object {
+
+        internal val libClass: Class<BorrowedFieldsLib> = BorrowedFieldsLib::class.java
+        internal val lib: BorrowedFieldsLib = Native.load("diplomat_feature_tests", libClass)
+        val NATIVESIZE: Long = Native.getNativeSize(BorrowedFieldsNative::class.java).toLong()
+
+        internal fun fromNative(nativeStruct: BorrowedFieldsNative, aEdges: List<Any?>): BorrowedFields {
+            val a: String = PrimitiveArrayTools.getUtf16(nativeStruct.a)
+            val b: String = PrimitiveArrayTools.getUtf8(nativeStruct.b)
+            val c: String = PrimitiveArrayTools.getUtf8(nativeStruct.c)
+
+            return BorrowedFields(a, b, c)
+        }
+
+        @JvmStatic
+        
+        fun fromBarAndStrings(bar: Bar, dstr16: String, utf8Str: String): BorrowedFields {
+            // This lifetime edge depends on lifetimes: 'x
+            val xEdges: MutableList<Any> = mutableListOf(bar);
+            val dstr16SliceMemory = PrimitiveArrayTools.borrowUtf16(dstr16).into(listOf(xEdges))
+            val utf8StrSliceMemory = PrimitiveArrayTools.borrowUtf8(utf8Str).into(listOf(xEdges))
+            
+            val returnVal = lib.BorrowedFields_from_bar_and_strings(bar.handle, dstr16SliceMemory.slice, utf8StrSliceMemory.slice);
+            val returnStruct = BorrowedFields.fromNative(returnVal, xEdges)
+            return returnStruct
+        }
+    }
+    internal fun toNative(aAppendArray: Array<MutableList<Any>>): BorrowedFieldsNative {
+        var native = BorrowedFieldsNative()
+        native.a = PrimitiveArrayTools.borrowUtf16(this.a).into(listOf(*aAppendArray)).slice
+        native.b = PrimitiveArrayTools.borrowUtf8(this.b).into(listOf(*aAppendArray)).slice
+        native.c = PrimitiveArrayTools.borrowUtf8(this.c).into(listOf(*aAppendArray)).slice
+        return native
+    }
+
+    internal fun aEdges(): List<Any?> {
+        return TODO("todo")
+    }
 }

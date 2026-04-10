@@ -1,0 +1,29 @@
+#include "diplomat_nanobind_common.hpp"
+
+
+#include "ResultOpaque.hpp"
+
+namespace somelib {
+void add_ResultOpaque_binding(nb::module_ mod) {
+    PyType_Slot somelib_ResultOpaque_slots[] = {
+        {Py_tp_free, (void *)somelib::ResultOpaque::operator delete },
+        {Py_tp_dealloc, (void *)diplomat_tp_dealloc},
+        {0, nullptr}};
+    
+    nb::class_<somelib::ResultOpaque> opaque(mod, "ResultOpaque", nb::type_slots(somelib_ResultOpaque_slots));
+    opaque
+        .def(nb::new_(std::move(maybe_op_unwrap(&somelib::ResultOpaque::new_))), "i"_a)
+        .def("assert_integer", &somelib::ResultOpaque::assert_integer, "i"_a)
+        .def("give_self", &somelib::ResultOpaque::give_self, nb::rv_policy::reference_internal)
+        .def_static("new_failing_bar", std::move(maybe_op_unwrap(&somelib::ResultOpaque::new_failing_bar)))
+        .def_static("new_failing_foo", std::move(maybe_op_unwrap(&somelib::ResultOpaque::new_failing_foo)))
+        .def_static("new_failing_struct", std::move(maybe_op_unwrap(&somelib::ResultOpaque::new_failing_struct)), "i"_a)
+        .def_static("new_failing_unit", std::move(maybe_op_unwrap(&somelib::ResultOpaque::new_failing_unit)))
+        .def_static("new_in_enum_err", std::move(maybe_op_unwrap(&somelib::ResultOpaque::new_in_enum_err)), "i"_a)
+        .def_static("new_in_err", std::move(maybe_op_unwrap(&somelib::ResultOpaque::new_in_err)), "i"_a)
+        .def_static("new_int", &somelib::ResultOpaque::new_int, "i"_a)
+        .def("__str__", &somelib::ResultOpaque::stringify_error, nb::rv_policy::reference_internal)
+        .def("takes_str", &somelib::ResultOpaque::takes_str, "_v"_a, nb::rv_policy::reference_internal);
+}
+
+} 

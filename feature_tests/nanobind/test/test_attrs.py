@@ -1,9 +1,13 @@
 import somelib
+import pytest
 
 def test_attrs():
     r = somelib.ns.AttrOpaque1Renamed() # Contructor works!
     assert r.method == 77, "property should call"
     assert r.abirenamed == 123, "method should call"
+
+    r2 = somelib.ns.AttrOpaque1Renamed(0)
+    assert r2.method == 77
 
     e = somelib.ns.RenamedAttrEnum.A
 
@@ -46,3 +50,15 @@ def test_attrs():
 
     assert somelib.ns.RenamedOpaqueArithmetic.make(0, 1).x() == 0
     assert somelib.ns.RenamedOpaqueArithmetic.make(0.5, 1.0).x() == 2
+    assert somelib.ns.RenamedOpaqueArithmetic.make(0.5, z=True).y() == 1
+    assert somelib.ns.RenamedStringList.return_new() == ["Test!", 'T', 'e', 's', 't', '!']
+    assert somelib.ns.RenamedBlockOverride.special_function() == "This is a custom binding."
+
+def test_indexing():
+    i = somelib.ns.RenamedMyIndexer(["This", "is", "a", "test"])
+    assert i[0] == "This"
+    assert i[3] == "test"
+    assert i["test"] == "test"
+    assert i["This"] == "This"
+    with pytest.raises(IndexError):
+        assert i["gibberish"]

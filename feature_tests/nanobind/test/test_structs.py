@@ -16,17 +16,20 @@ def test_structs():
     assert s.g == -1, "enum fn"
     assert s.into_a() == 17, "struct fn"
 
+    
+    s2 = somelib.MyStruct(10)
+    assert s2.e == 10
+
     assert somelib.StructArithmetic.ORIGIN.x == 0
 
     sl = somelib.PrimitiveStructVec()
     sl.append(somelib.PrimitiveStruct(1, True, 'c', 0, 0, 0))
     sl.append(somelib.PrimitiveStruct(2, False, ' ', 0, 0, 0))
     sl.append(somelib.PrimitiveStruct(-1, False, ' ', 0, 0, 0))
-    sl = somelib.PrimitiveStructSlice(sl.asSliceMut)
-    somelib.PrimitiveStruct.mutable_slice(sl)
+    sl = sl.asSlice
     assert sl[0].x == 1
-    assert sl[1].x == 3
-    assert sl[2].x == 2
+    assert sl[1].x == 2
+    assert sl[2].x == -1
 
     bg = somelib.BigStructWithStuffSlice()
     bg.append(somelib.BigStructWithStuff())

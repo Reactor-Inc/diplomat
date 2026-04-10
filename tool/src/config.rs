@@ -1,4 +1,8 @@
-use std::{collections::HashMap, path::Path, str};
+use std::{
+    collections::{HashMap, HashSet},
+    path::{Path, PathBuf},
+    str,
+};
 
 use quote::ToTokens;
 use serde::{Deserialize, Serialize};
@@ -8,7 +12,7 @@ use syn::{
 };
 use toml::{value::Table, Value};
 
-use crate::{demo_gen::DemoConfig, js::JsConfig, kotlin::KotlinConfig};
+use crate::{cpp::CppConfig, demo_gen::DemoConfig, js::JsConfig, kotlin::KotlinConfig};
 use diplomat_core::hir::LoweringConfig;
 
 #[derive(Clone, Default, Debug, Serialize, Deserialize)]
@@ -17,6 +21,14 @@ pub struct SharedConfig {
     /// Whether or not callbacks support references in parameters. This is unsafe: you need to be careful to not
     /// retain these references on the foreign side.
     pub unsafe_references_in_callbacks: Option<bool>,
+    /// The folder to pull custom bindings from. Defaults to the lib.rs folder.
+    pub custom_extra_code_location: PathBuf,
+    /// List of features to enable/disable generation for.
+    pub features_enabled: HashSet<String>,
+    /// Where the manifest for this library is located.
+    /// Used to detect relative include locations for `#[diplomat::include()]`.
+    /// By default, is set to the parent of the parent of the given entry file.
+    pub manifest_dir: Option<String>,
 }
 
 impl SharedConfig {
@@ -24,7 +36,13 @@ impl SharedConfig {
     pub fn overrides_shared(name: &str) -> bool {
         // Expect the first item in the iterator to be the name of the language, so we eliminate that:
         let name: String = name.split(".").skip(1).collect();
-        matches!(name.as_str(), "lib_name" | "unsafe_references_in_callbacks")
+        matches!(
+            name.as_str(),
+            "lib_name"
+                | "unsafe_references_in_callbacks"
+                | "custom_extra_code_location"
+                | "features_enabled"
+        )
     }
 
     pub fn set(&mut self, key: &str, value: Value) {
@@ -42,6 +60,40 @@ impl SharedConfig {
                 } else {
                     panic!("Config key `unsafe_references_in_callbacks` must be a boolean");
                 }
+            }
+            "custom_extra_code_location" => {
+                if value.is_str() {
+                    self.custom_extra_code_location = PathBuf::from(value.as_str().unwrap())
+                } else {
+                    panic!("Config key `custom_extra_code_location` must be a string");
+                }
+            }
+            "features_enabled" => {
+                let hash_set = match &value {
+                    Value::Array(arr) => {
+                        let str_arr : HashSet<String> = arr.iter().map(|v| {
+                            let st = v.as_str().unwrap_or_else(|| panic!("Expected features_enabled=[] to be an array of strings. Got {v:?}"));
+                            st.to_string()
+                        }).collect();
+                        str_arr
+                    }
+                    Value::Table(t) if t.len() == 1 => t.keys().cloned().collect(),
+                    Value::String(st) => {
+                        // Serde Toml has screwed up reading an array:
+                        if st.starts_with("[") && st.ends_with("]") {
+                            let slice = &st[1..st.len() - 1];
+                            let hash = slice
+                                .split(",")
+                                .map(|s| s.replace("\"", "").trim().to_string())
+                                .collect();
+                            hash
+                        } else {
+                            HashSet::from([st.clone()])
+                        }
+                    }
+                    _ => panic!("Config key `features_enabled` must be an array or string."),
+                };
+                self.features_enabled = hash_set;
             }
             _ => (),
         }
@@ -66,6 +118,8 @@ pub struct Config {
     pub demo_gen_config: DemoConfig,
     #[serde(rename = "js")]
     pub js_config: JsConfig,
+    #[serde(rename = "cpp")]
+    pub cpp_config: CppConfig,
     /// Any language can override what's in [`SharedConfig`]. This is a structure that holds information about those specific overrides. [`Config`] will update [`SharedConfig`] based on the current language.
     #[serde(skip)]
     pub language_overrides: HashMap<String, Value>,
@@ -95,6 +149,12 @@ impl Config {
                 self.language_overrides.insert(key.to_string(), value);
             } else {
                 self.js_config.set(&key.replace("js.", ""), value);
+            }
+        } else if key.starts_with("cpp.") {
+            if SharedConfig::overrides_shared(key) {
+                self.language_overrides.insert(key.to_string(), value);
+            } else {
+                self.cpp_config.set(&key.replace("cpp.", ""), value);
             }
         } else {
             self.shared_config.set(key, value)

@@ -18,7 +18,7 @@ Diplomat only supports a small set of types that can be passed over FFI.
          - `&str`: A validated, UTF-8 string. Will be converted/validated by the target language bindings if necessary.
          - `&DiplomatStr`: An unvalidated string expected to be UTF-8.
          - `&DiplomatStr16`: An unvalidated string expected to be UTF-16.
-     - [`DiplomatWriteable`](./writeable.md) for returning strings. This needs to be the last parameter of the method.
+     - [`DiplomatWrite`](./write.md) for returning strings. This needs to be the last parameter of the method.
      - [`Option<&T>` ,`Option<Box<T>>`](./option.md) of opaque types, `Option<T>` of structs, enums, primitives, or the above slice types
      - [Callbacks](./callbacks.md) in parameters. Support is limited.
      - `Result<T, E>` in return values
@@ -26,7 +26,8 @@ Diplomat only supports a small set of types that can be passed over FFI.
  - Custom types
      - Custom [opaque types](./opaque.md) (passed as references or via `Box<T>`)
      - Custom [structs and C-like enums](./structs.md)
+     - Custom [traits](./traits.md)
 
-More types can be supported in the future (We have an issue open for [traits](https://github.com/rust-diplomat/diplomat/pull/621))
+More types can be supported in the future.
 
 The _main_ distinction to keep track of is between "opaque types" and "structs": opaque types are for when you want to wrap a Rust object that has its own semantics, whereas "structs" are for when you want to transparently pass around multiple values at once (usually when you want to make an options struct as an argument, or return multiple values at once).

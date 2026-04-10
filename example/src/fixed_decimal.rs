@@ -1,11 +1,10 @@
 #[diplomat::bridge]
 #[diplomat::abi_rename = "icu4x_{0}_mv1"]
-#[diplomat::attr(auto, namespace = "icu4x")]
 pub mod ffi {
     use diplomat_runtime::DiplomatWrite;
     use writeable::Writeable;
 
-    #[diplomat::opaque]
+    #[diplomat::opaque_mut]
     // Attr for generating mocking interface in kotlin backend to enable JVM test fakes.
     #[diplomat::attr(kotlin, generate_mocking_interface)]
     #[diplomat::rust_link(fixed_decimal::FixedDecimal, Struct)]

@@ -1,4 +1,4 @@
-#[allow(clippy::needless_lifetimes)]
+#[allow(clippy::needless_lifetimes, deprecated)]
 #[diplomat::bridge]
 pub mod ffi {
     use diplomat_runtime::DiplomatStr16;
@@ -20,10 +20,12 @@ pub mod ffi {
     #[derive(Debug, PartialEq, Eq)]
     pub enum MyEnum {
         A = -2,
+        #[deprecated(note = "C is the new B")]
         B = -1,
         C = 0,
         #[diplomat::attr(auto, default)]
         D = 1,
+        /// EEEEEEE
         E = 2,
         F = 3,
     }
@@ -62,8 +64,6 @@ pub mod ffi {
 
     // Related to issue https://github.com/rust-diplomat/diplomat/issues/803
     // `diplomat-tool js` was crashing when trying to process options-in-structs
-    // Not supported in kotlin
-    #[diplomat::attr(kotlin, disable)]
     pub struct MyStructContainingAnOption {
         pub(crate) a: DiplomatOption<MyStruct>,
         pub(crate) b: DiplomatOption<DefaultEnum>,
@@ -196,6 +196,7 @@ pub mod ffi {
             Box::new(MyOpaqueEnum::A("a".into()))
         }
 
+        #[diplomat::attr(*, stringifier)]
         pub fn to_string(&self, write: &mut DiplomatWrite) {
             let _infallible = write!(
                 write,
@@ -231,13 +232,27 @@ pub mod ffi {
             }
         }
 
-        #[diplomat::attr(not(supports=struct_refs), disable)]
+        #[diplomat::attr(auto, constructor)]
+        #[diplomat::cfg(supports=method_overloading)]
+        pub fn new_overload(i: i32) -> MyStruct {
+            MyStruct {
+                a: 17,
+                b: true,
+                c: 209,
+                d: 1234,
+                e: i,
+                f: '餐' as DiplomatChar,
+                g: MyEnum::B,
+            }
+        }
+
+        #[diplomat::cfg(supports=struct_refs)]
         pub fn takes_mut(&mut self, o: &mut Self) {
             self.a = 0;
             o.c = 100;
         }
 
-        #[diplomat::attr(not(supports=struct_refs), disable)]
+        #[diplomat::cfg(supports=struct_refs)]
         pub fn takes_const(&self, o: &mut Self) {
             o.c = self.a;
         }
@@ -310,7 +325,7 @@ pub mod ffi {
             out.write_str(&self.a.field.to_string()).unwrap();
         }
 
-        #[diplomat::attr(not(supports=abi_compatibles), disable)]
+        #[diplomat::cfg(supports=abi_compatibles)]
         pub fn nested_slice(sl: &[CyclicStructA]) -> u8 {
             let mut sum = 0;
             for a in sl.iter() {
@@ -355,7 +370,7 @@ pub mod ffi {
     }
 
     /// Testing JS-specific layout/padding behavior
-    #[diplomat::attr(not(any(js, supports=abi_compatibles)), disable)]
+    #[diplomat::cfg(any(js, supports=abi_compatibles))]
     #[diplomat::attr(auto, abi_compatible)]
     pub struct ScalarPairWithPadding {
         pub first: u8,
@@ -372,7 +387,7 @@ pub mod ffi {
 
     /// Testing JS-specific layout/padding behavior
     /// Also being used to test CPP backends taking structs with primitive values.
-    #[diplomat::attr(not(any(js, supports=abi_compatibles)), disable)]
+    #[diplomat::cfg(any(js, supports=abi_compatibles))]
     #[diplomat::attr(auto, abi_compatible)]
     pub struct BigStructWithStuff {
         pub first: u8,
@@ -394,7 +409,7 @@ pub mod ffi {
             assert_eq!(extra_val, 853);
         }
 
-        #[diplomat::attr(not(supports=abi_compatibles), disable)]
+        #[diplomat::cfg(supports=abi_compatibles)]
         pub fn assert_slice(slice: &[BigStructWithStuff], second_value: u16) {
             assert!(slice.len() > 1);
             let mut i = slice.iter();
@@ -403,7 +418,7 @@ pub mod ffi {
         }
     }
 
-    #[diplomat::attr(not(supports = arithmetic), disable)]
+    #[diplomat::cfg(supports = arithmetic)]
     struct StructArithmetic {
         x: i32,
         y: i32,
@@ -480,7 +495,7 @@ pub mod ffi {
     }
 
     impl PrimitiveStruct {
-        #[diplomat::attr(not(supports=abi_compatibles), disable)]
+        #[diplomat::cfg(all(supports=abi_compatibles, supports=mutable_slices))]
         pub fn mutable_slice(a: &mut [PrimitiveStruct]) {
             let mut running_sum = 0.0;
             let mut alternate = false;
@@ -498,15 +513,15 @@ pub mod ffi {
             }
         }
 
-        #[diplomat::attr(not(supports=struct_refs), disable)]
+        #[diplomat::cfg(supports=struct_refs)]
         pub fn mutable_ref(&mut self, a: &mut Self) {
             self.a = false;
             a.d = 1;
         }
     }
 
-    #[diplomat::attr(not(supports=abi_compatibles), disable)]
-    #[diplomat::opaque]
+    #[diplomat::cfg(supports=abi_compatibles)]
+    #[diplomat::opaque_mut]
     pub struct PrimitiveStructVec(Vec<PrimitiveStruct>);
 
     impl PrimitiveStructVec {
@@ -531,6 +546,7 @@ pub mod ffi {
         }
 
         #[diplomat::attr(auto, getter = "asSliceMut")]
+        #[diplomat::cfg(supports=mutable_slices)]
         pub fn as_slice_mut<'a>(&'a mut self) -> &'a mut [PrimitiveStruct] {
             &mut self.0
         }
@@ -540,7 +556,7 @@ pub mod ffi {
             self.0[idx].clone()
         }
 
-        #[diplomat::attr(not(supports=abi_compatibles), disable)]
+        #[diplomat::cfg(supports=abi_compatibles)]
         pub fn take_slice_from_other_namespace(_sl: &[crate::attrs::ffi::StructWithAttrs]) {
             assert!(true)
         }

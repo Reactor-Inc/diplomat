@@ -23,28 +23,79 @@ internal class CyclicStructANative: Structure(), Structure.ByValue {
     }
 }
 
-class CyclicStructA internal constructor (
-    internal val nativeStruct: CyclicStructANative) {
-    val a: CyclicStructB = CyclicStructB(nativeStruct.a)
+
+
+
+internal class OptionCyclicStructANative constructor(): Structure(), Structure.ByValue {
+    @JvmField
+    internal var value: CyclicStructANative = CyclicStructANative()
+
+    @JvmField
+    internal var isOk: Byte = 0
+
+    // Define the fields of the struct
+    override fun getFieldOrder(): List<String> {
+        return listOf("value", "isOk")
+    }
+
+    internal fun option(): CyclicStructANative? {
+        if (isOk == 1.toByte()) {
+            return value
+        } else {
+            return null
+        }
+    }
+
+
+    constructor(value: CyclicStructANative, isOk: Byte): this() {
+        this.value = value
+        this.isOk = isOk
+    }
 
     companion object {
+        internal fun some(value: CyclicStructANative): OptionCyclicStructANative {
+            return OptionCyclicStructANative(value, 1)
+        }
+
+        internal fun none(): OptionCyclicStructANative {
+            return OptionCyclicStructANative(CyclicStructANative(), 0)
+        }
+    }
+
+}
+
+class CyclicStructA (var a: CyclicStructB) {
+    companion object {
+
         internal val libClass: Class<CyclicStructALib> = CyclicStructALib::class.java
-        internal val lib: CyclicStructALib = Native.load("somelib", libClass)
+        internal val lib: CyclicStructALib = Native.load("diplomat_feature_tests", libClass)
         val NATIVESIZE: Long = Native.getNativeSize(CyclicStructANative::class.java).toLong()
+
+        internal fun fromNative(nativeStruct: CyclicStructANative): CyclicStructA {
+            val a: CyclicStructB = CyclicStructB.fromNative(nativeStruct.a)
+
+            return CyclicStructA(a)
+        }
+
         @JvmStatic
         
         fun getB(): CyclicStructB {
             
             val returnVal = lib.CyclicStructA_get_b();
-            
-            val returnStruct = CyclicStructB(returnVal)
+            val returnStruct = CyclicStructB.fromNative(returnVal)
             return returnStruct
         }
     }
+    internal fun toNative(): CyclicStructANative {
+        var native = CyclicStructANative()
+        native.a = this.a.toNative()
+        return native
+    }
+
     
     fun cyclicOut(): String {
         val write = DW.lib.diplomat_buffer_write_create(0)
-        val returnVal = lib.CyclicStructA_cyclic_out(nativeStruct, write);
+        val returnVal = lib.CyclicStructA_cyclic_out(this.toNative(), write);
         
         val returnString = DW.writeToString(write)
         return returnString
@@ -52,7 +103,7 @@ class CyclicStructA internal constructor (
     
     fun doubleCyclicOut(cyclicStructA: CyclicStructA): String {
         val write = DW.lib.diplomat_buffer_write_create(0)
-        val returnVal = lib.CyclicStructA_double_cyclic_out(nativeStruct, cyclicStructA.nativeStruct, write);
+        val returnVal = lib.CyclicStructA_double_cyclic_out(this.toNative(), cyclicStructA.toNative(), write);
         
         val returnString = DW.writeToString(write)
         return returnString
@@ -60,10 +111,9 @@ class CyclicStructA internal constructor (
     
     fun getterOut(): String {
         val write = DW.lib.diplomat_buffer_write_create(0)
-        val returnVal = lib.CyclicStructA_getter_out(nativeStruct, write);
+        val returnVal = lib.CyclicStructA_getter_out(this.toNative(), write);
         
         val returnString = DW.writeToString(write)
         return returnString
     }
-
 }

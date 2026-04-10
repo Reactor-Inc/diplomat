@@ -19,17 +19,27 @@ class FixedDecimalFormatter internal constructor (
     // These ensure that anything that is borrowed is kept alive and not cleaned
     // up by the garbage collector.
     internal val selfEdges: List<Any>,
+    internal var owned: Boolean,
 )  {
 
-    internal class FixedDecimalFormatterCleaner(val handle: Pointer, val lib: FixedDecimalFormatterLib) : Runnable {
+    init {
+        if (this.owned) {
+            this.registerCleaner()
+        }
+    }
+
+    private class FixedDecimalFormatterCleaner(val handle: Pointer, val lib: FixedDecimalFormatterLib) : Runnable {
         override fun run() {
             lib.icu4x_FixedDecimalFormatter_destroy_mv1(handle)
         }
     }
+    private fun registerCleaner() {
+        CLEANER.register(this, FixedDecimalFormatter.FixedDecimalFormatterCleaner(handle, FixedDecimalFormatter.lib));
+    }
 
     companion object {
         internal val libClass: Class<FixedDecimalFormatterLib> = FixedDecimalFormatterLib::class.java
-        internal val lib: FixedDecimalFormatterLib = Native.load("somelib", libClass)
+        internal val lib: FixedDecimalFormatterLib = Native.load("diplomat_example", libClass)
         @JvmStatic
         
         /** Creates a new [FixedDecimalFormatter] from locale data.
@@ -38,12 +48,12 @@ class FixedDecimalFormatter internal constructor (
         */
         fun tryNew(locale: Locale, provider: DataProvider, options: FixedDecimalFormatterOptions): Result<FixedDecimalFormatter> {
             
-            val returnVal = lib.icu4x_FixedDecimalFormatter_try_new_mv1(locale.handle, provider.handle, options.nativeStruct);
-            if (returnVal.isOk == 1.toByte()) {
+            val returnVal = lib.icu4x_FixedDecimalFormatter_try_new_mv1(locale.handle, provider.handle, options.toNative());
+            val nativeOkVal = returnVal.getNativeOk();
+            if (nativeOkVal != null) {
                 val selfEdges: List<Any> = listOf()
-                val handle = returnVal.union.ok 
-                val returnOpaque = FixedDecimalFormatter(handle, selfEdges)
-                CLEANER.register(returnOpaque, FixedDecimalFormatter.FixedDecimalFormatterCleaner(handle, FixedDecimalFormatter.lib));
+                val handle = nativeOkVal 
+                val returnOpaque = FixedDecimalFormatter(handle, selfEdges, true)
                 return returnOpaque.ok()
             } else {
                 return UnitError().err()

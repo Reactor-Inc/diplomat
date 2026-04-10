@@ -16,27 +16,37 @@ class RefList internal constructor (
     // up by the garbage collector.
     internal val selfEdges: List<Any>,
     internal val aEdges: List<Any?>,
+    internal var owned: Boolean,
 )  {
 
-    internal class RefListCleaner(val handle: Pointer, val lib: RefListLib) : Runnable {
+    init {
+        if (this.owned) {
+            this.registerCleaner()
+        }
+    }
+
+    private class RefListCleaner(val handle: Pointer, val lib: RefListLib) : Runnable {
         override fun run() {
             lib.RefList_destroy(handle)
         }
     }
+    private fun registerCleaner() {
+        CLEANER.register(this, RefList.RefListCleaner(handle, RefList.lib));
+    }
 
     companion object {
         internal val libClass: Class<RefListLib> = RefListLib::class.java
-        internal val lib: RefListLib = Native.load("somelib", libClass)
+        internal val lib: RefListLib = Native.load("diplomat_feature_tests", libClass)
         @JvmStatic
         
         fun node(data: RefListParameter): RefList {
+            // This lifetime edge depends on lifetimes: 'b
+            val bEdges: MutableList<Any> = mutableListOf(data);
             
             val returnVal = lib.RefList_node(data.handle);
             val selfEdges: List<Any> = listOf()
-            val bEdges: List<Any?> = listOf(data)
             val handle = returnVal 
-            val returnOpaque = RefList(handle, selfEdges, bEdges)
-            CLEANER.register(returnOpaque, RefList.RefListCleaner(handle, RefList.lib));
+            val returnOpaque = RefList(handle, selfEdges, bEdges, true)
             return returnOpaque
         }
     }

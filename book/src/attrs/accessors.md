@@ -1,6 +1,6 @@
 # Getters and setters
 
-(Supported by `dart`, `js`, queried with `supports = accessors`)
+({{get_supports("accessors")}})
 
 
 ## Getters

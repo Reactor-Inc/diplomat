@@ -47,6 +47,7 @@ export class Float64Vec {
         }
 
         finally {
+            diplomatRuntime.FUNCTION_PARAM_ALLOC.clean();
             functionCleanupArena.free();
 
         }
@@ -64,6 +65,7 @@ export class Float64Vec {
         }
 
         finally {
+            diplomatRuntime.FUNCTION_PARAM_ALLOC.clean();
             functionCleanupArena.free();
 
         }
@@ -81,6 +83,7 @@ export class Float64Vec {
         }
 
         finally {
+            diplomatRuntime.FUNCTION_PARAM_ALLOC.clean();
             functionCleanupArena.free();
 
         }
@@ -98,6 +101,7 @@ export class Float64Vec {
         }
 
         finally {
+            diplomatRuntime.FUNCTION_PARAM_ALLOC.clean();
             functionCleanupArena.free();
 
         }
@@ -115,6 +119,7 @@ export class Float64Vec {
         }
 
         finally {
+            diplomatRuntime.FUNCTION_PARAM_ALLOC.clean();
             functionCleanupArena.free();
 
         }
@@ -132,6 +137,7 @@ export class Float64Vec {
         }
 
         finally {
+            diplomatRuntime.FUNCTION_PARAM_ALLOC.clean();
             functionCleanupArena.free();
 
         }
@@ -149,6 +155,7 @@ export class Float64Vec {
         }
 
         finally {
+            diplomatRuntime.FUNCTION_PARAM_ALLOC.clean();
             functionCleanupArena.free();
 
         }
@@ -168,21 +175,8 @@ export class Float64Vec {
         }
 
         finally {
+            diplomatRuntime.FUNCTION_PARAM_ALLOC.clean();
             diplomatReceive.free();
-        }
-    }
-
-    fillSlice(v) {
-        let functionCleanupArena = new diplomatRuntime.CleanupArena();
-
-        const vSlice = functionCleanupArena.alloc(diplomatRuntime.DiplomatBuf.sliceWrapper(wasm, diplomatRuntime.DiplomatBuf.slice(wasm, v, "f64")));
-    wasm.Float64Vec_fill_slice(this.ffiValue, vSlice.ptr);
-
-        try {}
-
-        finally {
-            functionCleanupArena.free();
-
         }
     }
 
@@ -195,6 +189,7 @@ export class Float64Vec {
         try {}
 
         finally {
+            diplomatRuntime.FUNCTION_PARAM_ALLOC.clean();
             functionCleanupArena.free();
 
         }
@@ -210,6 +205,7 @@ export class Float64Vec {
         }
 
         finally {
+            diplomatRuntime.FUNCTION_PARAM_ALLOC.clean();
             write.free();
         }
     }
@@ -228,6 +224,7 @@ export class Float64Vec {
         }
 
         finally {
+            diplomatRuntime.FUNCTION_PARAM_ALLOC.clean();
             diplomatReceive.free();
         }
     }
@@ -246,6 +243,7 @@ export class Float64Vec {
         }
 
         finally {
+            diplomatRuntime.FUNCTION_PARAM_ALLOC.clean();
             diplomatReceive.free();
         }
     }

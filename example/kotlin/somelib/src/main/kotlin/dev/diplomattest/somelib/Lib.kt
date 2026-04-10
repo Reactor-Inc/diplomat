@@ -23,7 +23,7 @@ interface DiplomatWriteLib: Library {
 object DW {
 
     val libClass: Class<DiplomatWriteLib> = DiplomatWriteLib::class.java
-    val lib: DiplomatWriteLib = Native.load("somelib", libClass)
+    val lib: DiplomatWriteLib = Native.load("diplomat_example", libClass)
 
     fun writeToString (write: Pointer): String {
         try {
@@ -48,7 +48,7 @@ internal interface DiplomatJVMRuntimeLib: Library {
 internal class DiplomatJVMRuntime {
     companion object {
         val libClass: Class<DiplomatJVMRuntimeLib> = DiplomatJVMRuntimeLib::class.java
-        val lib: DiplomatJVMRuntimeLib = Native.load("somelib", libClass, Collections.singletonMap(Library.OPTION_ALLOW_OBJECTS, true))
+        val lib: DiplomatJVMRuntimeLib = Native.load("diplomat_example", libClass, Collections.singletonMap(Library.OPTION_ALLOW_OBJECTS, true))
 
         fun buildRustCookie(obj: Object): Pointer {
             return lib.create_rust_jvm_cookie(JNIEnv.CURRENT, obj);
@@ -66,10 +66,69 @@ interface DiplomatAllocateLib: Library {
 
 
 
+internal class GCSlice(val memory: Memory?, val slice: Slice) {
+    fun close() {
+        memory?.close()
+    }
+
+    // Stick the contained memory into a list of edges. Returns `this` for convenient chaining.
+    fun into(edges: List<MutableList<Any>>): GCSlice {
+        memory?.let {
+            for(edge in edges) {
+                edge.add(memory)
+            }
+        }
+        return this
+    }
+
+    // Stop managing this memory
+    fun leakStatic(): GCSlice {
+        GCSlice.persistedStaticSlices.add(this)
+        return this
+    }
+
+    companion object {
+        val persistedStaticSlices: MutableList<GCSlice> = mutableListOf()
+    }
+}
+
+internal class GCSlices(val memory: Memory?, val subMemory: List<Memory?>, val slice: Slice) {
+    fun close() {
+        memory?.close()
+        subMemory.forEach { it?.close() }
+    }
+
+    // Stick this object into a list of edges. Returns `this` for convenient chaining.
+    fun into(edges: List<MutableList<Any>>): GCSlices {
+        for(edge in edges) {
+            // Don't bother to split this into submemories, just use this object
+            // to tie GC things together
+            edge.add(this)
+        }
+        return this
+    }
+
+    // Stop managing this memory
+    fun leakStatic(): GCSlices {
+        GCSlices.persistedStaticSlices.add(this)
+        return this
+    }
+
+    companion object {
+        val persistedStaticSlices: MutableList<GCSlices> = mutableListOf()
+    }
+}
+
+
+internal class OwnedSlice(val pointer: Pointer?, val slice: Slice) {
+
+}
+
+
 internal object PrimitiveArrayTools {
 
     val libClass: Class<DiplomatAllocateLib> = DiplomatAllocateLib::class.java
-    val lib: DiplomatAllocateLib = Native.load("somelib", libClass)
+    val lib: DiplomatAllocateLib = Native.load("diplomat_example", libClass)
 
     fun allocateGarbageCollectedMemory(size: Long): Memory? {
         // we can't use the Memory constructor for a memory of size 0
@@ -114,58 +173,58 @@ internal object PrimitiveArrayTools {
         return slice
     }
 
-    fun borrow(boolArray: BooleanArray): Pair<Memory?, Slice> {
+    fun borrow(boolArray: BooleanArray): GCSlice {
         val mem = allocateGarbageCollectedMemory(boolArray.size.toLong())
         val byteArray = boolArray.map {if (it) 1.toByte() else 0.toByte() }.toByteArray()
         val slice = copy(byteArray, mem)
-        return Pair(mem, slice)
+        return GCSlice(mem, slice)
     }
 
-    fun move(boolArray: BooleanArray): Pair<Pointer?, Slice> {
+    fun move(boolArray: BooleanArray): OwnedSlice {
         val mem = allocateOwnedMemory(boolArray.size.toLong() * boolAlign, boolAlign)
         val byteArray = boolArray.map {if (it) 1.toByte() else 0.toByte() }.toByteArray()
         val slice = copy(byteArray, mem)
-        return Pair(mem, slice)
+        return OwnedSlice(mem, slice)
     }
 
-    fun borrow(byteArray: ByteArray): Pair<Memory?, Slice> {
+    fun borrow(byteArray: ByteArray): GCSlice {
         val mem = allocateGarbageCollectedMemory(byteArray.size.toLong())
         val slice = copy(byteArray, mem)
-        return Pair(mem, slice)
+        return GCSlice(mem, slice)
     }
 
-    fun move(byteArray: ByteArray): Pair<Pointer?, Slice> {
+    fun move(byteArray: ByteArray): OwnedSlice {
         val mem = allocateOwnedMemory(byteArray.size.toLong() * Byte.SIZE_BYTES.toLong(), uByteAlign, )
         val slice = copy(byteArray, mem)
-        return Pair(mem, slice)
+        return OwnedSlice(mem, slice)
     }
 
 
-    fun borrow(uByteArray: UByteArray): Pair<Memory?, Slice> {
+    fun borrow(uByteArray: UByteArray): GCSlice {
         val mem = allocateGarbageCollectedMemory(uByteArray.size.toLong())
         val byteArray = uByteArray.asByteArray()
         val slice = copy(byteArray, mem)
-        return Pair(mem, slice)
+        return GCSlice(mem, slice)
     }
 
-    fun move(uByteArray: UByteArray): Pair<Pointer?, Slice> {
+    fun move(uByteArray: UByteArray): OwnedSlice {
         val mem = allocateOwnedMemory(uByteArray.size.toLong() * Byte.SIZE_BYTES.toLong(), uByteAlign, )
         val byteArray = uByteArray.asByteArray()
         val slice = copy(byteArray, mem)
-        return Pair(mem, slice)
+        return OwnedSlice(mem, slice)
     }
 
 
-    fun borrow(shortArray: ShortArray): Pair<Memory?, Slice> {
+    fun borrow(shortArray: ShortArray): GCSlice {
         val mem = allocateGarbageCollectedMemory(Short.SIZE_BYTES * shortArray.size.toLong())
         val slice = copy(shortArray, mem)
-        return Pair(mem, slice)
+        return GCSlice(mem, slice)
     }
 
-    fun move(shortArray: ShortArray): Pair<Pointer?, Slice> {
+    fun move(shortArray: ShortArray): OwnedSlice {
         val mem = allocateOwnedMemory(Short.SIZE_BYTES * shortArray.size.toLong(), Short.SIZE_BYTES.toLong())
         val slice = copy(shortArray, mem)
-        return Pair(mem, slice)
+        return OwnedSlice(mem, slice)
     }
 
     fun copy(arr: ShortArray, ptr: Pointer?) : Slice {
@@ -180,18 +239,18 @@ internal object PrimitiveArrayTools {
         return slice
     }
 
-    fun borrow(uShortArray: UShortArray): Pair<Memory?, Slice> {
+    fun borrow(uShortArray: UShortArray): GCSlice {
         val mem = allocateGarbageCollectedMemory(Short.SIZE_BYTES * uShortArray.size.toLong())
         val shortArray = uShortArray.asShortArray()
         val slice = copy(shortArray, mem)
-        return Pair(mem, slice)
+        return GCSlice(mem, slice)
     }
 
-    fun move(uShortArray: UShortArray): Pair<Pointer?, Slice> {
+    fun move(uShortArray: UShortArray): OwnedSlice {
         val mem = allocateOwnedMemory(Short.SIZE_BYTES * uShortArray.size.toLong(), Short.SIZE_BYTES.toLong())
         val shortArray = uShortArray.asShortArray()
         val slice = copy(shortArray, mem)
-        return Pair(mem, slice)
+        return OwnedSlice(mem, slice)
     }
 
     fun copy(arr: IntArray, ptr: Pointer?) : Slice {
@@ -206,42 +265,42 @@ internal object PrimitiveArrayTools {
         return slice
     }
 
-    fun borrow(intArray: IntArray): Pair<Memory?, Slice> {
+    fun borrow(intArray: IntArray): GCSlice {
         val mem = allocateGarbageCollectedMemory(Int.SIZE_BYTES * intArray.size.toLong())
         val slice = copy(intArray, mem)
-        return Pair(mem, slice)
+        return GCSlice(mem, slice)
     }
 
-    fun move(intArray: IntArray): Pair<Pointer?, Slice> {
+    fun move(intArray: IntArray): OwnedSlice {
         val mem = allocateOwnedMemory(Int.SIZE_BYTES * intArray.size.toLong(), Int.SIZE_BYTES.toLong())
         val slice = copy(intArray, mem)
-        return Pair(mem, slice)
+        return OwnedSlice(mem, slice)
     }
 
-    fun borrow(uIntArray: UIntArray): Pair<Memory?, Slice> {
+    fun borrow(uIntArray: UIntArray): GCSlice {
         val mem = allocateGarbageCollectedMemory(Int.SIZE_BYTES * uIntArray.size.toLong())
         val intArray = uIntArray.asIntArray()
         val slice = copy(intArray, mem)
-        return Pair(mem, slice)
+        return GCSlice(mem, slice)
     }
 
-    fun move(uIntArray: UIntArray): Pair<Pointer?, Slice> {
+    fun move(uIntArray: UIntArray): OwnedSlice {
         val mem = allocateOwnedMemory(Int.SIZE_BYTES * uIntArray.size.toLong(), Int.SIZE_BYTES.toLong())
         val intArray = uIntArray.asIntArray()
         val slice = copy(intArray, mem)
-        return Pair(mem, slice)
+        return OwnedSlice(mem, slice)
     }
 
-    fun borrow(longArray: LongArray): Pair<Memory?, Slice> {
+    fun borrow(longArray: LongArray): GCSlice {
         val mem = allocateGarbageCollectedMemory(Long.SIZE_BYTES * longArray.size.toLong())
         val slice = copy(longArray, mem)
-        return Pair(mem, slice)
+        return GCSlice(mem, slice)
     }
 
-    fun move(longArray: LongArray): Pair<Pointer?, Slice> {
+    fun move(longArray: LongArray): OwnedSlice {
         val mem = allocateOwnedMemory(Long.SIZE_BYTES * longArray.size.toLong(), Long.SIZE_BYTES.toLong())
         val slice = copy(longArray, mem)
-        return Pair(mem, slice)
+        return OwnedSlice(mem, slice)
     }
 
     fun copy(arr: LongArray, ptr: Pointer?) : Slice {
@@ -256,18 +315,18 @@ internal object PrimitiveArrayTools {
         return slice
     }
 
-    fun borrow(uLongArray: ULongArray): Pair<Memory?, Slice> {
+    fun borrow(uLongArray: ULongArray): GCSlice {
         val mem = allocateGarbageCollectedMemory(Long.SIZE_BYTES * uLongArray.size.toLong())
         val longArray = uLongArray.asLongArray()
         val slice = copy(longArray, mem)
-        return Pair(mem, slice)
+        return GCSlice(mem, slice)
     }
 
-    fun move(uLongArray: ULongArray): Pair<Pointer?, Slice> {
+    fun move(uLongArray: ULongArray): OwnedSlice {
         val mem = allocateOwnedMemory(Long.SIZE_BYTES * uLongArray.size.toLong(), Long.SIZE_BYTES.toLong())
         val longArray = uLongArray.asLongArray()
         val slice = copy(longArray, mem)
-        return Pair(mem, slice)
+        return OwnedSlice(mem, slice)
     }
 
     fun copy(arr: FloatArray, ptr: Pointer?) : Slice {
@@ -282,16 +341,16 @@ internal object PrimitiveArrayTools {
         return slice
     }
 
-    fun borrow(floatArray: FloatArray): Pair<Memory?, Slice> {
+    fun borrow(floatArray: FloatArray): GCSlice {
         val mem = allocateGarbageCollectedMemory(Float.SIZE_BYTES * floatArray.size.toLong())
         val slice = copy(floatArray, mem)
-        return Pair(mem, slice)
+        return GCSlice(mem, slice)
     }
 
-    fun move(floatArray: FloatArray): Pair<Pointer?, Slice> {
+    fun move(floatArray: FloatArray): OwnedSlice {
         val mem = allocateOwnedMemory(Float.SIZE_BYTES * floatArray.size.toLong(), Float.SIZE_BYTES.toLong())
         val slice = copy(floatArray, mem)
-        return Pair(mem, slice)
+        return OwnedSlice(mem, slice)
     }
 
     fun copy(arr: DoubleArray, ptr: Pointer?) : Slice {
@@ -306,16 +365,16 @@ internal object PrimitiveArrayTools {
         return slice
     }
 
-    fun borrow(doubleArray: DoubleArray): Pair<Memory?, Slice> {
+    fun borrow(doubleArray: DoubleArray): GCSlice {
         val mem = allocateGarbageCollectedMemory(Double.SIZE_BYTES * doubleArray.size.toLong())
         val slice = copy(doubleArray, mem)
-        return Pair(mem, slice)
+        return GCSlice(mem, slice)
     }
 
-    fun move(doubleArray: DoubleArray): Pair<Pointer?, Slice> {
+    fun move(doubleArray: DoubleArray): OwnedSlice {
         val mem = allocateOwnedMemory(Double.SIZE_BYTES * doubleArray.size.toLong(), Double.SIZE_BYTES.toLong())
         val slice = copy(doubleArray, mem)
-        return Pair(mem, slice)
+        return OwnedSlice(mem, slice)
     }
 
 
@@ -363,19 +422,19 @@ internal object PrimitiveArrayTools {
         return slice.data.getDoubleArray(0, slice.len.toInt())
     }
 
-    fun borrowUtf8(str: String): Pair<Memory?, Slice> {
+    fun borrowUtf8(str: String): GCSlice {
         return borrow(str.toByteArray())
     }
 
-    fun moveUtf8(str: String): Pair<Pointer?, Slice> {
+    fun moveUtf8(str: String): OwnedSlice {
         return move(str.toByteArray())
     }
 
-    fun borrowUtf16(str: String): Pair<Memory?, Slice> {
+    fun borrowUtf16(str: String): GCSlice {
         return borrow(str.map {it.code.toShort()}.toShortArray())
     }
 
-    fun moveUtf16(str: String): Pair<Pointer?, Slice> {
+    fun moveUtf16(str: String): OwnedSlice {
         return move(str.map {it.code.toShort()}.toShortArray())
     }
 
@@ -392,7 +451,7 @@ internal object PrimitiveArrayTools {
         return charArray
     }
 
-    fun borrowUtf8s(array: Array<String>): Pair<List<Memory?>, Slice> {
+    fun borrowUtf8s(array: Array<String>): GCSlices {
         val sliceSize = Slice.SIZE
         val mem = allocateGarbageCollectedMemory(sliceSize * array.size.toLong())
         val ptr = if (mem != null) {
@@ -401,18 +460,18 @@ internal object PrimitiveArrayTools {
             Pointer(0)
         }
         val mems: List<Memory?> = array.zip(0..array.size.toLong()).map { (str, idx) ->
-            val (mem, slice) = borrowUtf8(str)
-            ptr.setPointer(idx * sliceSize, slice.data)
-            ptr.setLong(idx * sliceSize + Long.SIZE_BYTES, slice.len.toLong())
-            mem
+            val mem = borrowUtf8(str)
+            ptr.setPointer(idx * sliceSize, mem.slice.data)
+            ptr.setLong(idx * sliceSize + Long.SIZE_BYTES, mem.slice.len.toLong())
+            mem.memory
         }
         val slice = Slice()
         slice.data = ptr
         slice.len = FFISizet(array.size.toLong().toULong())
-        return Pair(mems + mem, slice)
+        return GCSlices(mem, mems, slice)
     }
 
-    fun borrowUtf16s(array: Array<String>): Pair<List<Memory?>, Slice> {
+    fun borrowUtf16s(array: Array<String>): GCSlices {
         val sliceSize = Slice.SIZE
         val mem = allocateGarbageCollectedMemory(sliceSize * array.size.toLong())
         val ptr = if (mem != null) {
@@ -421,15 +480,15 @@ internal object PrimitiveArrayTools {
             Pointer(0)
         }
         val mems: List<Memory?> = array.zip(0..array.size.toLong()).map { (str, idx) ->
-            val (mem, slice) = borrowUtf16(str)
-            ptr.setPointer(idx * sliceSize, slice.data)
-            ptr.setLong(idx * sliceSize + Long.SIZE_BYTES, slice.len.toLong())
-            mem
+            val mem = borrowUtf16(str)
+            ptr.setPointer(idx * sliceSize, mem.slice.data)
+            ptr.setLong(idx * sliceSize + Long.SIZE_BYTES, mem.slice.len.toLong())
+            mem.memory
         }
         val slice = Slice()
         slice.data = ptr
         slice.len = FFISizet(array.size.toLong().toULong())
-        return Pair(mems + mem, slice)
+        return GCSlices(mem, mems, slice)
     }
 
     fun getUtf16s(slice: Slice): List<String> {
@@ -465,13 +524,11 @@ class FFISizet(val value: ULong = 0u): com.sun.jna.IntegerType(Native.SIZE_T_SIZ
 
 class FFIIsizet(val value: Long = 0): com.sun.jna.IntegerType(Native.SIZE_T_SIZE, value, true)  {
     override fun toByte(): Byte = this.toLong().toByte()
-    override fun toChar(): Char = this.toLong().toInt().toChar()
     override fun toShort(): Short = this.toLong().toShort()
 }
 
 class FFIUint8(val value: UByte = 0u): com.sun.jna.IntegerType(1, value.toByte().toLong(), true)  {
     override fun toByte(): Byte = this.toLong().toByte()
-    override fun toChar(): Char = this.toLong().toInt().toChar()
     override fun toShort(): Short = this.toLong().toShort()
     fun toUByte(): UByte = this.toByte().toUByte()
     constructor(): this(0u)
@@ -479,7 +536,6 @@ class FFIUint8(val value: UByte = 0u): com.sun.jna.IntegerType(1, value.toByte()
 
 class FFIUint16(val value: UShort = 0u): com.sun.jna.IntegerType(2, value.toShort().toLong(), true)  {
     override fun toByte(): Byte = this.toLong().toByte()
-    override fun toChar(): Char = this.toLong().toInt().toChar()
     override fun toShort(): Short = this.toLong().toShort()
     fun toUShort(): UShort = this.toShort().toUShort()
     constructor(): this(0u)
@@ -487,7 +543,6 @@ class FFIUint16(val value: UShort = 0u): com.sun.jna.IntegerType(2, value.toShor
 
 class FFIUint32(val value: UInt = 0u): com.sun.jna.IntegerType(4, value.toInt().toLong(), true)  {
     override fun toByte(): Byte = this.toLong().toByte()
-    override fun toChar(): Char = this.toLong().toInt().toChar()
     override fun toShort(): Short = this.toLong().toShort()
     fun toUInt(): UInt = this.toInt().toUInt()
     constructor(): this(0u)
@@ -495,7 +550,6 @@ class FFIUint32(val value: UInt = 0u): com.sun.jna.IntegerType(4, value.toInt().
 
 class FFIUint64(val value: ULong = 0u): com.sun.jna.IntegerType(8, value.toLong(), true)  {
     override fun toByte(): Byte = this.toLong().toByte()
-    override fun toChar(): Char = this.toLong().toInt().toChar()
     override fun toShort(): Short = this.toLong().toShort()
     fun toULong(): ULong = this.toLong().toULong()
     constructor(): this(0u)
@@ -642,6 +696,19 @@ class ResultPointerUnit: Structure(), Structure.ByValue  {
     override fun getFieldOrder(): List<String> {
         return listOf("union", "isOk")
     }
+    internal fun getNativeOk(): Pointer? {
+        if (isOk == 1.toByte()) {
+            return union.getTypedValue(Pointer::class.java) as Pointer
+        }
+        return null
+    }
+    internal fun getNativeErr(): Unit? {
+        if (isOk == 0.toByte()) {
+            return Unit
+        }
+        return null
+    }
+
 }
 internal class ResultUnitUnitUnion: Union() {
 }
@@ -657,6 +724,570 @@ class ResultUnitUnit: Structure(), Structure.ByValue  {
     override fun getFieldOrder(): List<String> {
         return listOf("union", "isOk")
     }
+    internal fun getNativeOk(): Unit? {
+        if (isOk == 1.toByte()) {
+            return Unit
+        }
+        return null
+    }
+    internal fun getNativeErr(): Unit? {
+        if (isOk == 0.toByte()) {
+            return Unit
+        }
+        return null
+    }
+
 }
 
+
+internal class OptionUnit constructor(): Structure(), Structure.ByValue {@JvmField
+    internal var isOk: Byte = 0
+
+    // Define the fields of the struct
+    override fun getFieldOrder(): List<String> {
+        return listOf("value", "isOk")
+    }
+
+    internal fun option(): Unit? {
+        if (isOk == 1.toByte()) {
+            return Unit
+        } else {
+            return null
+        }
+    }
+
+
+}
+
+internal class OptionBoolean constructor(): Structure(), Structure.ByValue {
+    @JvmField
+    internal var value: Boolean = false
+
+    @JvmField
+    internal var isOk: Byte = 0
+
+    // Define the fields of the struct
+    override fun getFieldOrder(): List<String> {
+        return listOf("value", "isOk")
+    }
+
+    internal fun option(): Boolean? {
+        if (isOk == 1.toByte()) {
+            return value
+        } else {
+            return null
+        }
+    }
+
+
+    constructor(value: Boolean, isOk: Byte): this() {
+        this.value = value
+        this.isOk = isOk
+    }
+
+    companion object {
+        internal fun some(value: Boolean): OptionBoolean {
+            return OptionBoolean(value, 1)
+        }
+
+        internal fun none(): OptionBoolean {
+            return OptionBoolean(false, 0)
+        }
+    }
+
+}
+
+internal class OptionByte constructor(): Structure(), Structure.ByValue {
+    @JvmField
+    internal var value: Byte = 0
+
+    @JvmField
+    internal var isOk: Byte = 0
+
+    // Define the fields of the struct
+    override fun getFieldOrder(): List<String> {
+        return listOf("value", "isOk")
+    }
+
+    internal fun option(): Byte? {
+        if (isOk == 1.toByte()) {
+            return value
+        } else {
+            return null
+        }
+    }
+
+
+    constructor(value: Byte, isOk: Byte): this() {
+        this.value = value
+        this.isOk = isOk
+    }
+
+    companion object {
+        internal fun some(value: Byte): OptionByte {
+            return OptionByte(value, 1)
+        }
+
+        internal fun none(): OptionByte {
+            return OptionByte(0, 0)
+        }
+    }
+
+}
+
+internal class OptionShort constructor(): Structure(), Structure.ByValue {
+    @JvmField
+    internal var value: Short = 0
+
+    @JvmField
+    internal var isOk: Byte = 0
+
+    // Define the fields of the struct
+    override fun getFieldOrder(): List<String> {
+        return listOf("value", "isOk")
+    }
+
+    internal fun option(): Short? {
+        if (isOk == 1.toByte()) {
+            return value
+        } else {
+            return null
+        }
+    }
+
+
+    constructor(value: Short, isOk: Byte): this() {
+        this.value = value
+        this.isOk = isOk
+    }
+
+    companion object {
+        internal fun some(value: Short): OptionShort {
+            return OptionShort(value, 1)
+        }
+
+        internal fun none(): OptionShort {
+            return OptionShort(0, 0)
+        }
+    }
+
+}
+
+internal class OptionInt constructor(): Structure(), Structure.ByValue {
+    @JvmField
+    internal var value: Int = 0
+
+    @JvmField
+    internal var isOk: Byte = 0
+
+    // Define the fields of the struct
+    override fun getFieldOrder(): List<String> {
+        return listOf("value", "isOk")
+    }
+
+    internal fun option(): Int? {
+        if (isOk == 1.toByte()) {
+            return value
+        } else {
+            return null
+        }
+    }
+
+
+    constructor(value: Int, isOk: Byte): this() {
+        this.value = value
+        this.isOk = isOk
+    }
+
+    companion object {
+        internal fun some(value: Int): OptionInt {
+            return OptionInt(value, 1)
+        }
+
+        internal fun none(): OptionInt {
+            return OptionInt(0, 0)
+        }
+    }
+
+}
+
+internal class OptionLong constructor(): Structure(), Structure.ByValue {
+    @JvmField
+    internal var value: Long = 0
+
+    @JvmField
+    internal var isOk: Byte = 0
+
+    // Define the fields of the struct
+    override fun getFieldOrder(): List<String> {
+        return listOf("value", "isOk")
+    }
+
+    internal fun option(): Long? {
+        if (isOk == 1.toByte()) {
+            return value
+        } else {
+            return null
+        }
+    }
+
+
+    constructor(value: Long, isOk: Byte): this() {
+        this.value = value
+        this.isOk = isOk
+    }
+
+    companion object {
+        internal fun some(value: Long): OptionLong {
+            return OptionLong(value, 1)
+        }
+
+        internal fun none(): OptionLong {
+            return OptionLong(0, 0)
+        }
+    }
+
+}
+
+internal class OptionFFIUint8 constructor(): Structure(), Structure.ByValue {
+    @JvmField
+    internal var value: FFIUint8 = FFIUint8()
+
+    @JvmField
+    internal var isOk: Byte = 0
+
+    // Define the fields of the struct
+    override fun getFieldOrder(): List<String> {
+        return listOf("value", "isOk")
+    }
+
+    internal fun option(): FFIUint8? {
+        if (isOk == 1.toByte()) {
+            return value
+        } else {
+            return null
+        }
+    }
+
+
+    constructor(value: FFIUint8, isOk: Byte): this() {
+        this.value = value
+        this.isOk = isOk
+    }
+
+    companion object {
+        internal fun some(value: FFIUint8): OptionFFIUint8 {
+            return OptionFFIUint8(value, 1)
+        }
+
+        internal fun none(): OptionFFIUint8 {
+            return OptionFFIUint8(FFIUint8(), 0)
+        }
+    }
+
+}
+
+internal class OptionFFIUint16 constructor(): Structure(), Structure.ByValue {
+    @JvmField
+    internal var value: FFIUint16 = FFIUint16()
+
+    @JvmField
+    internal var isOk: Byte = 0
+
+    // Define the fields of the struct
+    override fun getFieldOrder(): List<String> {
+        return listOf("value", "isOk")
+    }
+
+    internal fun option(): FFIUint16? {
+        if (isOk == 1.toByte()) {
+            return value
+        } else {
+            return null
+        }
+    }
+
+
+    constructor(value: FFIUint16, isOk: Byte): this() {
+        this.value = value
+        this.isOk = isOk
+    }
+
+    companion object {
+        internal fun some(value: FFIUint16): OptionFFIUint16 {
+            return OptionFFIUint16(value, 1)
+        }
+
+        internal fun none(): OptionFFIUint16 {
+            return OptionFFIUint16(FFIUint16(), 0)
+        }
+    }
+
+}
+
+internal class OptionFFIUint32 constructor(): Structure(), Structure.ByValue {
+    @JvmField
+    internal var value: FFIUint32 = FFIUint32()
+
+    @JvmField
+    internal var isOk: Byte = 0
+
+    // Define the fields of the struct
+    override fun getFieldOrder(): List<String> {
+        return listOf("value", "isOk")
+    }
+
+    internal fun option(): FFIUint32? {
+        if (isOk == 1.toByte()) {
+            return value
+        } else {
+            return null
+        }
+    }
+
+
+    constructor(value: FFIUint32, isOk: Byte): this() {
+        this.value = value
+        this.isOk = isOk
+    }
+
+    companion object {
+        internal fun some(value: FFIUint32): OptionFFIUint32 {
+            return OptionFFIUint32(value, 1)
+        }
+
+        internal fun none(): OptionFFIUint32 {
+            return OptionFFIUint32(FFIUint32(), 0)
+        }
+    }
+
+}
+
+internal class OptionFFIUint64 constructor(): Structure(), Structure.ByValue {
+    @JvmField
+    internal var value: FFIUint64 = FFIUint64()
+
+    @JvmField
+    internal var isOk: Byte = 0
+
+    // Define the fields of the struct
+    override fun getFieldOrder(): List<String> {
+        return listOf("value", "isOk")
+    }
+
+    internal fun option(): FFIUint64? {
+        if (isOk == 1.toByte()) {
+            return value
+        } else {
+            return null
+        }
+    }
+
+
+    constructor(value: FFIUint64, isOk: Byte): this() {
+        this.value = value
+        this.isOk = isOk
+    }
+
+    companion object {
+        internal fun some(value: FFIUint64): OptionFFIUint64 {
+            return OptionFFIUint64(value, 1)
+        }
+
+        internal fun none(): OptionFFIUint64 {
+            return OptionFFIUint64(FFIUint64(), 0)
+        }
+    }
+
+}
+
+internal class OptionFFISizet constructor(): Structure(), Structure.ByValue {
+    @JvmField
+    internal var value: FFISizet = FFISizet()
+
+    @JvmField
+    internal var isOk: Byte = 0
+
+    // Define the fields of the struct
+    override fun getFieldOrder(): List<String> {
+        return listOf("value", "isOk")
+    }
+
+    internal fun option(): FFISizet? {
+        if (isOk == 1.toByte()) {
+            return value
+        } else {
+            return null
+        }
+    }
+
+
+    constructor(value: FFISizet, isOk: Byte): this() {
+        this.value = value
+        this.isOk = isOk
+    }
+
+    companion object {
+        internal fun some(value: FFISizet): OptionFFISizet {
+            return OptionFFISizet(value, 1)
+        }
+
+        internal fun none(): OptionFFISizet {
+            return OptionFFISizet(FFISizet(), 0)
+        }
+    }
+
+}
+
+internal class OptionFFIIsizet constructor(): Structure(), Structure.ByValue {
+    @JvmField
+    internal var value: FFIIsizet = FFIIsizet()
+
+    @JvmField
+    internal var isOk: Byte = 0
+
+    // Define the fields of the struct
+    override fun getFieldOrder(): List<String> {
+        return listOf("value", "isOk")
+    }
+
+    internal fun option(): FFIIsizet? {
+        if (isOk == 1.toByte()) {
+            return value
+        } else {
+            return null
+        }
+    }
+
+
+    constructor(value: FFIIsizet, isOk: Byte): this() {
+        this.value = value
+        this.isOk = isOk
+    }
+
+    companion object {
+        internal fun some(value: FFIIsizet): OptionFFIIsizet {
+            return OptionFFIIsizet(value, 1)
+        }
+
+        internal fun none(): OptionFFIIsizet {
+            return OptionFFIIsizet(FFIIsizet(), 0)
+        }
+    }
+
+}
+
+internal class OptionFloat constructor(): Structure(), Structure.ByValue {
+    @JvmField
+    internal var value: Float = 0.0F
+
+    @JvmField
+    internal var isOk: Byte = 0
+
+    // Define the fields of the struct
+    override fun getFieldOrder(): List<String> {
+        return listOf("value", "isOk")
+    }
+
+    internal fun option(): Float? {
+        if (isOk == 1.toByte()) {
+            return value
+        } else {
+            return null
+        }
+    }
+
+
+    constructor(value: Float, isOk: Byte): this() {
+        this.value = value
+        this.isOk = isOk
+    }
+
+    companion object {
+        internal fun some(value: Float): OptionFloat {
+            return OptionFloat(value, 1)
+        }
+
+        internal fun none(): OptionFloat {
+            return OptionFloat(0.0F, 0)
+        }
+    }
+
+}
+
+internal class OptionDouble constructor(): Structure(), Structure.ByValue {
+    @JvmField
+    internal var value: Double = 0.0
+
+    @JvmField
+    internal var isOk: Byte = 0
+
+    // Define the fields of the struct
+    override fun getFieldOrder(): List<String> {
+        return listOf("value", "isOk")
+    }
+
+    internal fun option(): Double? {
+        if (isOk == 1.toByte()) {
+            return value
+        } else {
+            return null
+        }
+    }
+
+
+    constructor(value: Double, isOk: Byte): this() {
+        this.value = value
+        this.isOk = isOk
+    }
+
+    companion object {
+        internal fun some(value: Double): OptionDouble {
+            return OptionDouble(value, 1)
+        }
+
+        internal fun none(): OptionDouble {
+            return OptionDouble(0.0, 0)
+        }
+    }
+
+}
+
+internal class OptionSlice constructor(): Structure(), Structure.ByValue {
+    @JvmField
+    internal var value: Slice = Slice()
+
+    @JvmField
+    internal var isOk: Byte = 0
+
+    // Define the fields of the struct
+    override fun getFieldOrder(): List<String> {
+        return listOf("value", "isOk")
+    }
+
+    internal fun option(): Slice? {
+        if (isOk == 1.toByte()) {
+            return value
+        } else {
+            return null
+        }
+    }
+
+
+    constructor(value: Slice, isOk: Byte): this() {
+        this.value = value
+        this.isOk = isOk
+    }
+
+    companion object {
+        internal fun some(value: Slice): OptionSlice {
+            return OptionSlice(value, 1)
+        }
+
+        internal fun none(): OptionSlice {
+            return OptionSlice(Slice(), 0)
+        }
+    }
+
+}
 

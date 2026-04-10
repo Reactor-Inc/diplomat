@@ -1,5 +1,11 @@
 
 
+export { RenamedDeprecatedStruct } from "./RenamedDeprecatedStruct.mjs"
+
+export { RenamedFeatureTest } from "./RenamedFeatureTest.mjs"
+
+export { RenamedRenamedCachedIncludeZST } from "./RenamedRenamedCachedIncludeZST.mjs"
+
 export { RenamedStructWithAttrs } from "./RenamedStructWithAttrs.mjs"
 
 export { RenamedTestMacroStruct } from "./RenamedTestMacroStruct.mjs"
@@ -14,7 +20,11 @@ export { BorrowedFieldsWithBounds } from "./BorrowedFieldsWithBounds.mjs"
 
 export { NestedBorrowedFields } from "./NestedBorrowedFields.mjs"
 
+export { BorrowingOptionStruct } from "./BorrowingOptionStruct.mjs"
+
 export { OptionInputStruct } from "./OptionInputStruct.mjs"
+
+export { CachedIncludeZST } from "./CachedIncludeZST.mjs"
 
 export { ErrorStruct } from "./ErrorStruct.mjs"
 
@@ -44,6 +54,10 @@ export { AttrOpaque1Renamed } from "./AttrOpaque1Renamed.mjs"
 
 export { RenamedAttrOpaque2 } from "./RenamedAttrOpaque2.mjs"
 
+export { RenamedDeprecatedOpaque } from "./RenamedDeprecatedOpaque.mjs"
+
+export { RenamedMixinTest } from "./RenamedMixinTest.mjs"
+
 export { RenamedMyIterable } from "./RenamedMyIterable.mjs"
 
 export { RenamedMyIterator } from "./RenamedMyIterator.mjs"
@@ -55,6 +69,10 @@ export { RenamedNested2 } from "./RenamedNested2.mjs"
 export { RenamedOpaqueIterable } from "./RenamedOpaqueIterable.mjs"
 
 export { RenamedOpaqueIterator } from "./RenamedOpaqueIterator.mjs"
+
+export { RenamedOpaqueRefIterable } from "./RenamedOpaqueRefIterable.mjs"
+
+export { RenamedOpaqueRefIterator } from "./RenamedOpaqueRefIterator.mjs"
 
 export { RenamedTestOpaque } from "./RenamedTestOpaque.mjs"
 
@@ -102,6 +120,8 @@ export { Utf16Wrap } from "./Utf16Wrap.mjs"
 
 export { RenamedAttrEnum } from "./RenamedAttrEnum.mjs"
 
+export { RenamedDeprecatedEnum } from "./RenamedDeprecatedEnum.mjs"
+
 export { UnimportedEnum } from "./UnimportedEnum.mjs"
 
 export { OptionEnum } from "./OptionEnum.mjs"
@@ -113,3 +133,8 @@ export { ContiguousEnum } from "./ContiguousEnum.mjs"
 export { DefaultEnum } from "./DefaultEnum.mjs"
 
 export { MyEnum } from "./MyEnum.mjs"
+
+import wasm from "./diplomat-wasm.mjs";
+import {FUNCTION_PARAM_ALLOC, internalConstructor} from "./diplomat-runtime.mjs";
+
+FUNCTION_PARAM_ALLOC.reserve(internalConstructor, wasm, 40);

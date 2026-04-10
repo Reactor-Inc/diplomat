@@ -1,7 +1,11 @@
-#[diplomat::bridge]
-pub mod ffi {
+use super::*;
 
-    #[diplomat::opaque]
+#[diplomat::bridge]
+#[diplomat::include("src/attrs/cache_test.rs")]
+pub mod ffi {
+    super::cache_test_macro! {CachedIncludeZST}
+
+    #[diplomat::opaque_mut]
     #[diplomat::attr(auto, error)]
     pub struct ResultOpaque(i32);
 
@@ -53,7 +57,7 @@ pub mod ffi {
             Ok(i)
         }
 
-        #[diplomat::attr(not(supports = custom_errors), disable)]
+        #[diplomat::cfg(supports = custom_errors)]
         pub fn new_failing_int(i: i32) -> Result<(), i32> {
             Err(i)
         }
@@ -62,10 +66,20 @@ pub mod ffi {
             Err(Box::new(ResultOpaque(i)))
         }
 
+        pub fn give_self<'a>(&'a self) -> Result<(), &'a Self> {
+            Err(self)
+        }
+
         /// When we take &str, the return type becomes a Result
         /// Test that this interacts gracefully with returning a reference type
         pub fn takes_str<'a>(&'a mut self, _v: &str) -> &'a mut Self {
             self
+        }
+
+        #[diplomat::attr(auto, stringifier)]
+        #[diplomat::attr(any(kotlin), disable)]
+        pub fn stringify_error<'a>(&'a self, _w: &mut DiplomatWrite) -> Result<(), &'a Self> {
+            Err(self)
         }
 
         pub fn assert_integer(&self, i: i32) {

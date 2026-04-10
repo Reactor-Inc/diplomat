@@ -19,17 +19,27 @@ class DataProvider internal constructor (
     // These ensure that anything that is borrowed is kept alive and not cleaned
     // up by the garbage collector.
     internal val selfEdges: List<Any>,
+    internal var owned: Boolean,
 )  {
 
-    internal class DataProviderCleaner(val handle: Pointer, val lib: DataProviderLib) : Runnable {
+    init {
+        if (this.owned) {
+            this.registerCleaner()
+        }
+    }
+
+    private class DataProviderCleaner(val handle: Pointer, val lib: DataProviderLib) : Runnable {
         override fun run() {
             lib.icu4x_DataProvider_destroy_mv1(handle)
         }
     }
+    private fun registerCleaner() {
+        CLEANER.register(this, DataProvider.DataProviderCleaner(handle, DataProvider.lib));
+    }
 
     companion object {
         internal val libClass: Class<DataProviderLib> = DataProviderLib::class.java
-        internal val lib: DataProviderLib = Native.load("somelib", libClass)
+        internal val lib: DataProviderLib = Native.load("diplomat_example", libClass)
         @JvmStatic
         
         /** See the [Rust documentation for `get_static_provider`](https://docs.rs/icu_testdata/latest/icu_testdata/fn.get_static_provider.html) for more information.
@@ -39,8 +49,7 @@ class DataProvider internal constructor (
             val returnVal = lib.icu4x_DataProvider_new_static_mv1();
             val selfEdges: List<Any> = listOf()
             val handle = returnVal 
-            val returnOpaque = DataProvider(handle, selfEdges)
-            CLEANER.register(returnOpaque, DataProvider.DataProviderCleaner(handle, DataProvider.lib));
+            val returnOpaque = DataProvider(handle, selfEdges, true)
             return returnOpaque
         }
         @JvmStatic
@@ -50,7 +59,8 @@ class DataProvider internal constructor (
         fun returnsResult(): Result<Unit> {
             
             val returnVal = lib.icu4x_DataProvider_returns_result_mv1();
-            if (returnVal.isOk == 1.toByte()) {
+            val nativeOkVal = returnVal.getNativeOk();
+            if (nativeOkVal != null) {
                 return Unit.ok()
             } else {
                 return UnitError().err()
