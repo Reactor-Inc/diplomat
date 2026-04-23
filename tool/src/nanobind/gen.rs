@@ -241,7 +241,7 @@ impl<'ccx, 'tcx: 'ccx> ItemGenContext<'ccx, 'tcx> {
         let field_decls = def
             .fields
             .iter()
-            .map(|field| self.gen_ty_decl(&field.ty, field.name.as_str()))
+            .map(|field| self.gen_field_ty_decl(&field.ty, field.name.as_str()))
             .collect::<Vec<_>>();
         self.generating_struct_fields = false;
 
@@ -335,7 +335,7 @@ impl<'ccx, 'tcx: 'ccx> ItemGenContext<'ccx, 'tcx> {
                                 e.def = info.def.clone(); // when a setter exists, use it's qualifiers instead.
                                 e.param_decls = info.param_decls.clone(); // also it's params, since the getter has none by definition.
                             }
-                            None | Some(hir::SpecialMethod::Constructor) => {
+                            None | Some(hir::SpecialMethod::Constructor | hir::SpecialMethod::NamedConstructor(_)) => {
                                 if matches!(e.method.attrs.special_method, Some(hir::SpecialMethod::Constructor)) ^ matches!(method.attrs.special_method, Some(hir::SpecialMethod::Constructor)) {
                                     self.errors.push_error(format!("Methods {} and {} need to both be constructors to be overloaded properly.", e.method_name, info.method_name));
                                 }
@@ -354,7 +354,7 @@ impl<'ccx, 'tcx: 'ccx> ItemGenContext<'ccx, 'tcx> {
                                         e.overloads.push(OverloadInfo { parameters: info.param_decls.clone(), method_name: Some(info.cpp_method_name.to_string()) });
                                     }
                                 } else {
-                                    e.overloads.push(OverloadInfo { parameters: info.param_decls.clone(), method_name: None});
+                                    e.overloads.push(OverloadInfo { parameters: info.param_decls.clone(), method_name: Some(info.cpp_method_name.to_string()) });
                                 }
                             }
                             _ => { panic!("Method Info for {} already exists but isn't a getter or setter!", e.method_name); }
@@ -380,7 +380,7 @@ impl<'ccx, 'tcx: 'ccx> ItemGenContext<'ccx, 'tcx> {
     }
 
     /// Generates C++ code for referencing a particular type with a given name.
-    fn gen_ty_decl<'a, P: TyPosition>(
+    fn gen_field_ty_decl<'a, P: TyPosition>(
         &mut self,
         ty: &'a Type<P>,
         var_name: &'a str,
@@ -388,12 +388,10 @@ impl<'ccx, 'tcx: 'ccx> ItemGenContext<'ccx, 'tcx> {
     where
         'ccx: 'a,
     {
-        let var_name = self.formatter.cxx.fmt_param_name(var_name);
-        let type_name = self.cpp.gen_type_name(ty);
-
+        let named_type_cpp = self.cpp.gen_field_ty_decl(true, ty, var_name);
         NamedType {
-            name: var_name,
-            type_name,
+            name: named_type_cpp.var_name,
+            type_name: named_type_cpp.type_name,
             ty,
         }
     }

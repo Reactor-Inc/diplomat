@@ -30,6 +30,8 @@ export { CachedIncludeZST } from "./CachedIncludeZST"
 
 export { ErrorStruct, ErrorStruct_obj } from "./ErrorStruct"
 
+export { FallibleOpaqueConstructor, FallibleOpaqueConstructor_obj } from "./FallibleOpaqueConstructor"
+
 export { BigStructWithStuff, BigStructWithStuff_obj } from "./BigStructWithStuff"
 
 export { CyclicStructA, CyclicStructA_obj } from "./CyclicStructA"
@@ -47,6 +49,8 @@ export { MyZst } from "./MyZst"
 export { PrimitiveStruct, PrimitiveStruct_obj } from "./PrimitiveStruct"
 
 export { ScalarPairWithPadding, ScalarPairWithPadding_obj } from "./ScalarPairWithPadding"
+
+export { StructOfOpaque, StructOfOpaque_obj } from "./StructOfOpaque"
 
 export { StructWithSlices, StructWithSlices_obj } from "./StructWithSlices"
 
@@ -115,6 +119,8 @@ export { MyString } from "./MyString"
 export { MyOpaqueEnum } from "./MyOpaqueEnum"
 
 export { Opaque } from "./Opaque"
+
+export { OpaqueMut } from "./OpaqueMut"
 
 export { OpaqueMutexedString } from "./OpaqueMutexedString"
 

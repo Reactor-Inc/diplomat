@@ -28,6 +28,8 @@ export { CachedIncludeZST } from "./CachedIncludeZST.mjs"
 
 export { ErrorStruct } from "./ErrorStruct.mjs"
 
+export { FallibleOpaqueConstructor } from "./FallibleOpaqueConstructor.mjs"
+
 export { BigStructWithStuff } from "./BigStructWithStuff.mjs"
 
 export { CyclicStructA } from "./CyclicStructA.mjs"
@@ -45,6 +47,8 @@ export { MyZst } from "./MyZst.mjs"
 export { PrimitiveStruct } from "./PrimitiveStruct.mjs"
 
 export { ScalarPairWithPadding } from "./ScalarPairWithPadding.mjs"
+
+export { StructOfOpaque } from "./StructOfOpaque.mjs"
 
 export { StructWithSlices } from "./StructWithSlices.mjs"
 
@@ -113,6 +117,8 @@ export { MyString } from "./MyString.mjs"
 export { MyOpaqueEnum } from "./MyOpaqueEnum.mjs"
 
 export { Opaque } from "./Opaque.mjs"
+
+export { OpaqueMut } from "./OpaqueMut.mjs"
 
 export { OpaqueMutexedString } from "./OpaqueMutexedString.mjs"
 

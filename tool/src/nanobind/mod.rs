@@ -50,6 +50,7 @@ pub(crate) fn attr_support() -> BackendAttrSupport {
     a.generate_mocking_interface = false;
     a.abi_compatibles = true;
     a.struct_refs = true;
+    a.mut_struct_refs = true;
     a.free_functions = true;
     a.custom_bindings = true;
 
@@ -58,7 +59,7 @@ pub(crate) fn attr_support() -> BackendAttrSupport {
 
 pub(crate) fn run<'cx>(
     tcx: &'cx hir::TypeContext,
-    conf: Config,
+    mut conf: Config,
     docs: &'cx DocsUrlGenerator,
 ) -> (FileMap, ErrorStore<'cx, String>) {
     let files = FileMap::default();
@@ -74,6 +75,7 @@ pub(crate) fn run<'cx>(
         .clone();
 
     // Output the C++ bindings we rely on
+    conf.cpp_config.structs_always_mut_ref = true;
     let (cpp_files, cpp_errors) = cpp::run(tcx, &conf, docs);
 
     files.files.borrow_mut().extend(
