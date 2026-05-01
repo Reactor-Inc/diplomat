@@ -168,6 +168,28 @@ pub mod ffi {
     }
 
     #[diplomat::opaque]
+    #[diplomat::cfg(supports = partial_comparators)]
+    pub struct PartialComparable(f32);
+    impl PartialComparable {
+        #[diplomat::attr(auto, constructor)]
+        pub fn new(float: f32) -> Box<Self> {
+            Box::new(Self(float))
+        }
+
+        #[diplomat::attr(auto, comparison)]
+        pub fn partial_cmp(&self, other: &PartialComparable) -> Option<core::cmp::Ordering> {
+            self.0.partial_cmp(&other.0)
+        }
+
+        pub fn test_nonstd(
+            &self,
+            other: &PartialComparable,
+        ) -> DiplomatOption<core::cmp::Ordering> {
+            self.0.partial_cmp(&other.0).into()
+        }
+    }
+
+    #[diplomat::opaque]
     #[diplomat::cfg(supports = indexing)]
     pub struct MyIndexer(Vec<String>);
 
@@ -310,6 +332,12 @@ pub mod ffi {
 
         pub fn x(&self) -> i32 {
             self.x
+        }
+
+        #[diplomat::attr(supports=method_overloading, rename="x")]
+        #[diplomat::cfg(supports=method_overloading)]
+        pub fn x_overload(&self, add: i32) -> i32 {
+            self.x + add
         }
 
         pub fn y(&self) -> i32 {
@@ -652,8 +680,8 @@ pub mod ffi {
         }
 
         #[diplomat::attr(auto, indexer)]
-        pub fn indexer(&self, _idx: usize) -> Box<Self> {
-            Box::new(Self)
+        pub fn indexer(&self, _idx: usize) -> Option<Box<Self>> {
+            Some(Box::new(Self))
         }
     }
 
@@ -681,6 +709,25 @@ pub mod ffi {
         #[diplomat::attr(auto, stringifier)]
         pub fn stringify(&self, _w: &mut DiplomatWrite) -> Result<(), Box<OpaqueZST>> {
             Err(Box::new(OpaqueZST))
+        }
+    }
+
+    #[diplomat::opaque]
+    pub struct OpaqueZSTIndexer;
+
+    impl OpaqueZSTIndexer {
+        #[diplomat::attr(auto, constructor)]
+        pub fn new() -> Box<Self> {
+            Box::new(Self)
+        }
+
+        #[diplomat::attr(auto, indexer)]
+        pub fn index(&self, idx: usize) -> Option<Box<Self>> {
+            if idx > 2 {
+                None
+            } else {
+                Some(Box::new(Self))
+            }
         }
     }
 }

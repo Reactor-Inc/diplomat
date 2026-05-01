@@ -50,6 +50,7 @@ def test_attrs():
     assert c > a, "greater"
 
     assert somelib.ns.RenamedOpaqueArithmetic.make(0, 1).x() == 0
+    assert somelib.ns.RenamedOpaqueArithmetic.make(0, 1).x(1) == 1
     assert somelib.ns.RenamedOpaqueArithmetic.make(0.5, 1.0).x() == 2
     assert somelib.ns.RenamedOpaqueArithmetic.make(0.5, z=True).y() == 1
     assert somelib.ns.RenamedStringList.return_new() == ["Test!", 'T', 'e', 's', 't', '!']
@@ -63,3 +64,23 @@ def test_indexing():
     assert i["This"] == "This"
     with pytest.raises(IndexError):
         assert i["gibberish"]
+
+def test_sequencing():
+    i = 0
+    ind = somelib.ns.RenamedOpaqueZSTIndexer()
+    # Test that sequence iteration works properly, even for ZSTs:
+    for a in ind:
+        i = i + 1
+    assert i == 3
+
+def test_partial_comparison():
+    import math
+    a = somelib.ns.RenamedPartialComparable(10)
+    b = somelib.ns.RenamedPartialComparable(20)
+    c = somelib.ns.RenamedPartialComparable(math.nan)
+    assert b > a
+    assert a < b
+    assert a != b
+    assert not(c > a)
+    assert not(c == a)
+    assert not(c != a)
