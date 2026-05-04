@@ -495,7 +495,7 @@ impl<'ccx, 'tcx: 'ccx> ItemGenContext<'ccx, 'tcx> {
             }
             Type::Slice(hir::Slice::Strs(encoding)) => format!(
                 "diplomat::span<const {}>",
-                self.formatter.cxx.fmt_borrowed_str(encoding)
+                self.formatter.cxx.fmt_borrowed_str_in_slice(encoding)
             )
             .into(),
             Type::Slice(hir::Slice::Struct(b, ref st)) => {
@@ -509,7 +509,7 @@ impl<'ccx, 'tcx: 'ccx> ItemGenContext<'ccx, 'tcx> {
             Type::DiplomatOption(ref inner) => {
                 format!("std::optional<{}>", self.gen_type_name(inner)).into()
             }
-            Type::Callback(..) => "".into(),
+            Type::Callback(ref cb) => format!("std::function<{}>", self.cpp.gen_fn_sig(cb)).into(),
             _ => unreachable!("unknown AST/HIR variant"),
         }
     }
