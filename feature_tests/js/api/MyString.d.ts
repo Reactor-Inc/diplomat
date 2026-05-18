@@ -26,5 +26,11 @@ export class MyString {
 
     borrow(): string;
 
+    static sliceOfOpaques(sl: Array<MyString>): string;
+
+    static optionalSliceOfOpaques(sl: Array<MyString | null>): string;
+
+    static otherOpaqueType(other: Array<Float64Vec>): string;
+
     constructor(v: string);
 }
