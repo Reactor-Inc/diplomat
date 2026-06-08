@@ -22,6 +22,12 @@ class RenamedOpaqueArithmetic;
 namespace somelib::ns {
 namespace capi {
     struct RenamedOpaqueArithmetic;
+
+
+    typedef struct DiplomatRenamedOpaqueArithmeticView {
+      const RenamedOpaqueArithmetic** data;
+      size_t len;
+    } DiplomatRenamedOpaqueArithmeticView;
 } // namespace capi
 } // namespace
 
@@ -29,9 +35,9 @@ namespace somelib::ns {
 class RenamedOpaqueArithmetic {
 public:
 
-  inline static std::unique_ptr<somelib::ns::RenamedOpaqueArithmetic> make(int32_t x, int32_t y);
+  inline static std::unique_ptr<somelib::ns::RenamedOpaqueArithmetic> make(int32_t x, int32_t y = 12);
 
-  inline static std::unique_ptr<somelib::ns::RenamedOpaqueArithmetic> make(float x, float y);
+  inline static std::unique_ptr<somelib::ns::RenamedOpaqueArithmetic> make(float x, float y = 14.48, std::optional<float> z = 0);
 
   inline static std::unique_ptr<somelib::ns::RenamedOpaqueArithmetic> make(float x, bool z);
 

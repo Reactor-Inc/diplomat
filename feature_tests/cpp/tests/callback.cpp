@@ -184,4 +184,18 @@ int main(int argc, char *argv[])
         });
     }
 
+    {
+        o.test_result_option_struct_conversion([]() {
+            return diplomat::Ok<std::optional<somelib::MyStruct>>(std::optional(somelib::MyStruct {
+                5,
+                false,
+                1,
+                2,
+                3,
+                'A',
+                somelib::MyEnum::A
+            }));
+        });
+    }
+
 }
