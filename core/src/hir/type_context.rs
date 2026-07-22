@@ -7,6 +7,7 @@ use super::{
     OpaqueDef, OutStructDef, StructDef, TraitDef, TypeDef,
 };
 use crate::ast::attrs::AttrInheritContext;
+use crate::ast::SpanLocation;
 #[allow(unused_imports)] // use in docs links
 use crate::hir;
 use crate::hir::ParamSelf;
@@ -219,8 +220,9 @@ impl TypeContext {
         cfg: LoweringConfig,
         attr_validator: impl AttributeValidator + 'static,
         include_info: Option<ast::ModuleIncludeInfo<'ast>>,
+        entry_location: &SpanLocation,
     ) -> Result<Self, Vec<ErrorAndContext>> {
-        let types = ast::File::from_syn(s, include_info).all_types();
+        let types = ast::File::from_syn(s, include_info, entry_location).all_types();
         let (mut ctx, hir) = Self::from_ast_without_validation(&types, cfg, attr_validator)?;
         ctx.errors.set_item("(validation)");
         hir.validate(&mut ctx.errors);
@@ -335,6 +337,7 @@ impl TypeContext {
             errors,
             attr_validator,
             cfg,
+            type_usage: HashMap::new(),
         };
 
         let out_structs = ctx.lower_all_out_structs(ast_out_structs.into_iter());
@@ -345,7 +348,46 @@ impl TypeContext {
         let functions = ctx.lower_all_functions(ast_functions.into_iter());
 
         match (out_structs, structs, opaques, enums, functions, traits) {
-            (Ok(out_structs), Ok(structs), Ok(opaques), Ok(enums), Ok(functions), Ok(traits)) => {
+            (
+                Ok(mut out_structs),
+                Ok(mut structs),
+                Ok(mut opaques),
+                Ok(mut enums),
+                Ok(functions),
+                Ok(mut traits),
+            ) => {
+                // After lowering, now we update with usage information (and proper indexing into the HashMap):
+                ctx.update_usage(
+                    out_structs
+                        .iter_mut()
+                        .enumerate()
+                        .map(|s| (OutStructId(s.0).into(), s.1)),
+                );
+                ctx.update_usage(
+                    structs
+                        .iter_mut()
+                        .enumerate()
+                        .map(|s| (StructId(s.0).into(), s.1)),
+                );
+                ctx.update_usage(
+                    opaques
+                        .iter_mut()
+                        .enumerate()
+                        .map(|s| (OpaqueId(s.0).into(), s.1)),
+                );
+                ctx.update_usage(
+                    enums
+                        .iter_mut()
+                        .enumerate()
+                        .map(|s| (EnumId(s.0).into(), s.1)),
+                );
+                ctx.update_usage(
+                    traits
+                        .iter_mut()
+                        .enumerate()
+                        .map(|s| (TraitId(s.0).into(), s.1)),
+                );
+
                 let res = Self {
                     out_structs,
                     structs,
@@ -867,6 +909,7 @@ impl TryInto<TraitId> for SymbolId {
 
 #[cfg(test)]
 mod tests {
+    use crate::ast::SpanLocation;
     use crate::hir;
     use std::fmt::Write;
 
@@ -880,7 +923,7 @@ mod tests {
             attr_validator.support.option = true;
             attr_validator.support.abi_compatibles = true;
             attr_validator.support.free_functions = true;
-            match hir::TypeContext::from_syn(&parsed, Default::default(), attr_validator, None) {
+            match hir::TypeContext::from_syn(&parsed, Default::default(), attr_validator, None, &SpanLocation::None) {
                 Ok(_context) => (),
                 Err(e) => {
                     for (ctx, err) in e {
@@ -1313,7 +1356,13 @@ mod tests {
         let mut attr_validator = hir::BasicAttributeValidator::new("tests");
         attr_validator.support.mut_struct_refs = true;
         attr_validator.support.abi_compatibles = true;
-        match hir::TypeContext::from_syn(&parsed, Default::default(), attr_validator, None) {
+        match hir::TypeContext::from_syn(
+            &parsed,
+            Default::default(),
+            attr_validator,
+            None,
+            &SpanLocation::None,
+        ) {
             Ok(_context) => (),
             Err(e) => {
                 for (ctx, err) in e {
@@ -1347,7 +1396,13 @@ mod tests {
         let mut attr_validator = hir::BasicAttributeValidator::new("tests");
         attr_validator.support.abi_compatibles = true;
         attr_validator.support.mut_struct_refs = true;
-        match hir::TypeContext::from_syn(&parsed, Default::default(), attr_validator, None) {
+        match hir::TypeContext::from_syn(
+            &parsed,
+            Default::default(),
+            attr_validator,
+            None,
+            &SpanLocation::None,
+        ) {
             Ok(_context) => (),
             Err(e) => {
                 for (ctx, err) in e {
@@ -1383,7 +1438,13 @@ mod tests {
         let mut attr_validator = hir::BasicAttributeValidator::new("tests");
         attr_validator.support.abi_compatibles = true;
         attr_validator.support.struct_refs = true;
-        match hir::TypeContext::from_syn(&parsed, Default::default(), attr_validator, None) {
+        match hir::TypeContext::from_syn(
+            &parsed,
+            Default::default(),
+            attr_validator,
+            None,
+            &SpanLocation::None,
+        ) {
             Ok(_context) => (),
             Err(e) => {
                 for (ctx, err) in e {
@@ -1415,7 +1476,13 @@ mod tests {
         attr_validator.support.abi_compatibles = true;
         attr_validator.support.struct_refs = true;
         attr_validator.support.callbacks = true;
-        match hir::TypeContext::from_syn(&parsed, Default::default(), attr_validator, None) {
+        match hir::TypeContext::from_syn(
+            &parsed,
+            Default::default(),
+            attr_validator,
+            None,
+            &SpanLocation::None,
+        ) {
             Ok(_context) => (),
             Err(e) => {
                 for (ctx, err) in e {
@@ -1459,7 +1526,8 @@ mod tests {
         let config = super::LoweringConfig {
             unsafe_references_in_callbacks: true,
         };
-        match hir::TypeContext::from_syn(&parsed, config, attr_validator, None) {
+        match hir::TypeContext::from_syn(&parsed, config, attr_validator, None, &SpanLocation::None)
+        {
             Ok(_context) => (),
             Err(e) => {
                 for (ctx, err) in e {
@@ -1498,7 +1566,8 @@ mod tests {
         let config = super::LoweringConfig {
             unsafe_references_in_callbacks: true,
         };
-        match hir::TypeContext::from_syn(&parsed, config, attr_validator, None) {
+        match hir::TypeContext::from_syn(&parsed, config, attr_validator, None, &SpanLocation::None)
+        {
             Ok(_context) => (),
             Err(e) => {
                 for (ctx, err) in e {
@@ -1627,7 +1696,8 @@ mod tests {
         attr_validator.support.struct_refs = true;
         attr_validator.support.mut_struct_refs = true;
         let config = super::LoweringConfig::default();
-        match hir::TypeContext::from_syn(&parsed, config, attr_validator, None) {
+        match hir::TypeContext::from_syn(&parsed, config, attr_validator, None, &SpanLocation::None)
+        {
             Ok(_context) => (),
             Err(e) => {
                 for (ctx, err) in e {
@@ -1663,7 +1733,8 @@ mod tests {
         let config = super::LoweringConfig {
             unsafe_references_in_callbacks: true,
         };
-        match hir::TypeContext::from_syn(&parsed, config, attr_validator, None) {
+        match hir::TypeContext::from_syn(&parsed, config, attr_validator, None, &SpanLocation::None)
+        {
             Ok(_context) => (),
             Err(e) => {
                 for (ctx, err) in e {
@@ -1672,5 +1743,75 @@ mod tests {
             }
         };
         insta::with_settings!({}, { insta::assert_snapshot!(output) });
+    }
+
+    #[test]
+    fn test_usage() {
+        let m = crate::ast::Module::from_syn(
+            &syn::parse_quote! {
+                #[diplomat::bridge]
+                mod ffi {
+                    #[diplomat::opaque]
+                    pub struct Opaque(i32);
+
+                    impl Opaque {
+                        pub fn used_in_option(u : Option<&UsedInOptionOpaque>) -> Option<Box<OptionUsedInReturnOpaque>> {}
+
+                        pub fn used_in_slice<'a>(op: &'a [&'a UsedInSliceOpaque]) -> &'a [UsedInSlice] {}
+
+                        pub fn struct_option_ret() -> Option<StructOptionUsedInReturn> {}
+
+                        pub fn struct_result_ret() -> Result<UsedInSlice, i32> {}
+
+                        pub fn option_result_ret() -> Result<Box<UsedInOptionOpaque>, UsedInSlice> {}
+
+                        pub fn callback_result(f : impl Fn() -> Result<&UsedInOptionOpaque, UsedInSlice>) {}
+                    }
+
+                    #[diplomat::opaque]
+                    pub struct UsedInOptionOpaque(i32);
+
+                    #[diplomat::opaque]
+                    pub struct UsedInSliceOpaque(i32);
+
+                    pub struct UsedInSlice {
+                        a : i32
+                    }
+
+                    #[diplomat::opaque]
+                    pub struct OptionUsedInReturnOpaque(i32);
+
+                    pub struct StructOptionUsedInReturn {
+                        a: i32
+                    }
+
+                }
+
+            },
+            true,
+            None,
+            &crate::ast::SpanLocation::None,
+        );
+        let mut env = crate::Env::default();
+        let mut top_symbols = crate::ModuleEnv::new(Default::default());
+
+        m.insert_all_types(crate::ast::Path::empty(), &mut env);
+        top_symbols.insert(
+            m.name.clone(),
+            crate::ast::ModSymbol::SubModule(m.name.clone()),
+        );
+
+        env.insert(crate::ast::Path::empty(), top_symbols);
+
+        let mut backend = crate::hir::BasicAttributeValidator::new("test-backend");
+        backend.support.static_slices = true;
+        backend.support.callbacks = true;
+        backend.support.opaque_slices = true;
+
+        let (_, tcx) =
+            crate::hir::TypeContext::from_ast_without_validation(&env, Default::default(), backend)
+                .unwrap();
+
+        insta::assert_debug_snapshot!(tcx);
     }
 }

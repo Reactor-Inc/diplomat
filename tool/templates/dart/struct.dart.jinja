@@ -77,6 +77,26 @@ final class {{type_name}}
     {%- endif %}
     struct.{{field.name}} = {{field.dart_to_c}};
     {%- endfor %}
+    {%- for l in lifetimes.all_lifetimes() %}
+    {%- let ltname = lifetimes.fmt_lifetime(l) %}
+    {%- for field in self::iter_fields_with_lifetimes_from_set(fields, l) %}
+      {%- if field.is_opaque() || field.is_option_opaque() %}
+        {%- if field.is_nullable() %}
+    if ({{field.name}} != null && {{ltname}}AppendArray.isNotEmpty) {
+      for (final edge in {{ltname}}AppendArray) {
+        edge.add({{field.name}}!);
+      }
+    }
+        {%- else %}
+    if ({{ltname}}AppendArray.isNotEmpty) {
+      for (final edge in {{ltname}}AppendArray) {
+        edge.add({{field.name}});
+      }
+    }
+        {%- endif %}
+      {%- endif %}
+    {%- endfor %}
+    {%- endfor %}
     return struct;
   }
   {%- endif %}
@@ -122,12 +142,7 @@ final class {{type_name}}
           ...{{field.name}}._fieldsForLifetime{{st.env.fmt_lifetime(def_lt).to_uppercase()}}
           {%- endfor -%}
         {%- else -%}
-        {# When we update to Dart 3.8+ we can use null-aware-field syntax (a prefix `?`) here #}
-          {%- if let Type::DiplomatOption(_) = field.ty -%}
-            if ({{field.name}} != null) {{field.name}}!
-          {%- else -%}
-            {{field.name}}
-          {%- endif -%}
+          {%- if let Type::DiplomatOption(_) = field.ty %}?{% endif %}{{field.name}}
         {%- endif -%}
     {%- endfor -%}
     ];

@@ -20,12 +20,6 @@ class Utf16Wrap;
 namespace somelib {
 namespace capi {
     struct Utf16Wrap;
-
-
-    typedef struct DiplomatUtf16WrapView {
-      const Utf16Wrap** data;
-      size_t len;
-    } DiplomatUtf16WrapView;
 } // namespace capi
 } // namespace
 
@@ -39,7 +33,7 @@ public:
   template<typename W>
   inline void get_debug_str_write(W& writeable_output) const;
 
-  inline std::u16string_view borrow_cont() const;
+  inline std::u16string_view borrow_cont() const DIPLOMAT_LIFETIME_BOUND;
 
     inline const somelib::capi::Utf16Wrap* AsFFI() const;
     inline somelib::capi::Utf16Wrap* AsFFI();

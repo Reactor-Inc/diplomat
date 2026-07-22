@@ -23,10 +23,12 @@ pub mod ffi {
             Box::new(Self(String::from_utf8(v.into()).unwrap()))
         }
 
+        #[diplomat::attr(dotnet, disable)]
         pub fn new_from_first(v: &[DiplomatStrSlice]) -> Box<MyString> {
             Box::new(Self(core::str::from_utf8(v[0].into()).unwrap().into()))
         }
 
+        #[diplomat::attr(dotnet, disable)]
         pub fn new_from_utf16(v: &[DiplomatStr16Slice]) -> Box<MyString> {
             let first: &[u16] = v[0].into();
             Box::new(Self(String::from_utf16(first).unwrap()))
@@ -42,6 +44,7 @@ pub mod ffi {
             let _infallible = write!(write, "{}", self.0);
         }
 
+        #[diplomat::attr(dotnet, disable)]
         pub fn get_static_str() -> &'static str {
             "hello"
         }
@@ -51,6 +54,7 @@ pub mod ffi {
             let _ = write;
         }
 
+        #[diplomat::attr(dotnet, disable)]
         pub fn borrow<'a>(&'a self) -> DiplomatStrSlice<'a> {
             AsRef::<[u8]>::as_ref(&self.0).into()
         }
@@ -87,26 +91,31 @@ pub mod ffi {
         }
 
         #[diplomat::attr(auto, named_constructor = "bool")]
+        #[diplomat::attr(dotnet, disable)]
         pub fn new_bool(v: &[bool]) -> Box<Float64Vec> {
             Box::new(Self(v.iter().map(|&x| x as u8 as f64).collect()))
         }
 
         #[diplomat::attr(auto, named_constructor = "i16")]
+        #[diplomat::attr(dotnet, disable)]
         pub fn new_i16(v: &[i16]) -> Box<Float64Vec> {
             Box::new(Self(v.iter().map(|&x| x as f64).collect()))
         }
 
         #[diplomat::attr(auto, named_constructor = "u16")]
+        #[diplomat::attr(dotnet, disable)]
         pub fn new_u16(v: &[u16]) -> Box<Float64Vec> {
             Box::new(Self(v.iter().map(|&x| x as f64).collect()))
         }
 
         #[diplomat::attr(auto, named_constructor = "isize")]
+        #[diplomat::attr(dotnet, disable)]
         pub fn new_isize(v: &[isize]) -> Box<Float64Vec> {
             Box::new(Self(v.iter().map(|&x| x as f64).collect()))
         }
 
         #[diplomat::attr(auto, named_constructor = "usize")]
+        #[diplomat::attr(dotnet, disable)]
         pub fn new_usize(v: &[usize]) -> Box<Float64Vec> {
             Box::new(Self(v.iter().map(|&x| x as f64).collect()))
         }
@@ -127,15 +136,18 @@ pub mod ffi {
         }
 
         #[diplomat::attr(auto, getter = "asSlice")]
+        #[diplomat::attr(dotnet, disable)]
         pub fn as_slice<'a>(&'a self) -> &'a [f64] {
             &self.0
         }
 
         #[diplomat::cfg(supports=mutable_slices)]
+        #[diplomat::attr(dotnet, disable)]
         pub fn fill_slice(&self, v: &mut [f64]) {
             v.copy_from_slice(&self.0)
         }
 
+        #[diplomat::attr(dotnet, disable)]
         pub fn set_value(&mut self, new_slice: &[f64]) {
             self.0 = new_slice.to_vec();
         }
@@ -146,6 +158,7 @@ pub mod ffi {
         }
 
         #[allow(clippy::needless_lifetimes)]
+        #[diplomat::attr(dotnet, disable)]
         pub fn borrow<'a>(&'a self) -> &'a [f64] {
             &self.0
         }
@@ -153,6 +166,56 @@ pub mod ffi {
         #[diplomat::attr(auto, indexer)]
         pub fn get(&self, i: usize) -> Option<f64> {
             self.0.get(i).copied()
+        }
+    }
+
+    // Owned opaque returns borrowing a `&[u8]` param: on .NET the param becomes
+    // ReadOnlyMemory<u8> pinned for the returned view's lifetime (PR #1201).
+    #[diplomat::opaque]
+    #[diplomat::attr(not(dotnet), disable)]
+    pub struct OpaqueSliceView<'a>(&'a [u8]);
+
+    #[diplomat::opaque]
+    #[diplomat::attr(not(dotnet), disable)]
+    pub struct SliceParseError;
+
+    impl<'a> OpaqueSliceView<'a> {
+        pub fn parse(data: &'a [u8]) -> Result<Box<OpaqueSliceView<'a>>, Box<SliceParseError>> {
+            if data.is_empty() {
+                Err(Box::new(SliceParseError))
+            } else {
+                Ok(Box::new(OpaqueSliceView(data)))
+            }
+        }
+
+        // Errs on a NON-empty buffer (leading zero byte), so the .NET side
+        // pins a real GCHandle and then must dispose it on the throw path.
+        pub fn parse_strict(
+            data: &'a [u8],
+        ) -> Result<Box<OpaqueSliceView<'a>>, Box<SliceParseError>> {
+            if !data.is_empty() && data[0] == 0 {
+                Err(Box::new(SliceParseError))
+            } else {
+                Ok(Box::new(OpaqueSliceView(data)))
+            }
+        }
+
+        pub fn wrap(data: &'a [u8]) -> Box<OpaqueSliceView<'a>> {
+            Box::new(OpaqueSliceView(data))
+        }
+
+        pub fn length(&self) -> u32 {
+            self.0.len() as u32
+        }
+
+        pub fn get(&self, index: u32) -> u8 {
+            self.0.get(index as usize).copied().unwrap_or(0)
+        }
+
+        pub fn sum(&self) -> u32 {
+            self.0
+                .iter()
+                .fold(0u32, |acc, &b| acc.wrapping_add(b as u32))
         }
     }
 

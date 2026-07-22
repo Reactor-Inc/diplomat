@@ -11,23 +11,27 @@ pub mod ffi {
     #[diplomat::transparent_convert]
     pub struct Bar<'b, 'a: 'b>(&'b Foo<'a>);
 
+    #[diplomat::attr(dotnet, disable)]
     pub struct BorrowedFields<'a> {
         a: DiplomatStr16Slice<'a>,
         b: DiplomatStrSlice<'a>,
         c: DiplomatUtf8StrSlice<'a>,
     }
 
+    #[diplomat::attr(dotnet, disable)]
     pub struct BorrowedFieldsWithBounds<'a, 'b: 'a, 'c: 'b> {
         field_a: DiplomatStr16Slice<'a>,
         field_b: DiplomatStrSlice<'b>,
         field_c: DiplomatUtf8StrSlice<'c>,
     }
 
+    #[diplomat::attr(dotnet, disable)]
     pub struct BorrowedFieldsReturning<'a> {
         bytes: DiplomatStrSlice<'a>,
     }
     impl<'a> Foo<'a> {
         #[diplomat::attr(auto, constructor)]
+        #[diplomat::attr(dotnet, disable)]
         pub fn new(x: &'a DiplomatStr) -> Box<Self> {
             Box::new(Foo(x))
         }
@@ -43,6 +47,7 @@ pub mod ffi {
             Box::new(Foo(x))
         }
 
+        #[diplomat::attr(dotnet, disable)]
         pub fn as_returning(&self) -> BorrowedFieldsReturning<'a> {
             BorrowedFieldsReturning {
                 bytes: self.0.into(),
@@ -50,12 +55,14 @@ pub mod ffi {
         }
 
         #[diplomat::attr(auto, named_constructor)]
+        #[diplomat::attr(dotnet, disable)]
         pub fn extract_from_fields(fields: BorrowedFields<'a>) -> Box<Self> {
             Box::new(Foo(fields.b.into()))
         }
 
         // Don't yet support borrowing from slices
         #[diplomat::attr(auto, named_constructor)]
+        #[diplomat::attr(dotnet, disable)]
         /// Test that the extraction logic correctly pins the right fields
         pub fn extract_from_bounds<'x, 'y: 'x + 'a, 'z: 'x + 'y>(
             bounds: BorrowedFieldsWithBounds<'x, 'y, 'z>,
@@ -97,6 +104,7 @@ pub mod ffi {
         }
     }
 
+    #[diplomat::attr(dotnet, disable)]
     pub struct NestedBorrowedFields<'x, 'y: 'x, 'z> {
         fields: BorrowedFields<'x>,
         bounds: BorrowedFieldsWithBounds<'x, 'y, 'y>,
@@ -330,11 +338,12 @@ pub mod ffi {
         }
     }
 
-    #[diplomat::opaque]
+    #[diplomat::opaque_mut]
     pub struct OpaqueThinVec(std::vec::Vec<crate::lifetimes::Internal>);
 
     impl OpaqueThinVec {
         #[diplomat::attr(auto, constructor)]
+        #[diplomat::attr(dotnet, disable)]
         pub fn create(a: &[i32], b: &[f32], c: &DiplomatStr) -> Box<Self> {
             assert!(a.len() == b.len(), "arrays must be of equal size");
             Box::new(Self(
@@ -347,6 +356,28 @@ pub mod ffi {
                     })
                     .collect(),
             ))
+        }
+
+        // The .NET backend disables the slice-based `create`, so the dotnet
+        // borrowed-return tests need a constructor they can call from C# to get
+        // a real owner to borrow `First()`/`Get()` out of.
+        #[diplomat::attr(not(dotnet), disable)]
+        pub fn create_single(a: i32, b: f32, c: &DiplomatStr) -> Box<Self> {
+            Box::new(Self(vec![crate::lifetimes::Internal {
+                a,
+                b,
+                c: String::from_utf8(c.to_vec()).unwrap(),
+            }]))
+        }
+
+        // dotnet-only: the borrowed-return aliasing test replaces the owner's
+        // heap-backed `String` here and reads it back through `First()` to prove
+        // the borrow isn't a copy.
+        #[diplomat::attr(not(dotnet), disable)]
+        pub fn set_first_c(&mut self, value: &DiplomatStr) {
+            if let Some(first) = self.0.first_mut() {
+                first.c = String::from_utf8(value.to_vec()).unwrap();
+            }
         }
 
         #[diplomat::attr(auto, iterable)]
@@ -371,6 +402,102 @@ pub mod ffi {
         pub fn first<'a>(&'a self) -> Option<&'a OpaqueThin> {
             self.0.get(0).map(OpaqueThin::transparent_convert)
         }
+
+        #[diplomat::attr(not(dotnet), disable)]
+        pub fn try_first<'a>(&'a self, fail: bool) -> Result<&'a OpaqueThin, ()> {
+            if fail {
+                Err(())
+            } else {
+                self.0
+                    .first()
+                    .map(OpaqueThin::transparent_convert)
+                    .ok_or(())
+            }
+        }
+
+        #[diplomat::attr(not(dotnet), disable)]
+        pub fn try_get<'a>(&'a self, idx: usize, fail: bool) -> Result<Option<&'a OpaqueThin>, ()> {
+            if fail {
+                Err(())
+            } else {
+                Ok(self.0.get(idx).map(OpaqueThin::transparent_convert))
+            }
+        }
+
+        #[diplomat::attr(not(dotnet), disable)]
+        pub fn try_iter<'a>(&'a self, fail: bool) -> Result<Box<OpaqueThinIter<'a>>, ()> {
+            if fail {
+                Err(())
+            } else {
+                Ok(Box::new(OpaqueThinIter(self.0.iter())))
+            }
+        }
+
+        #[diplomat::attr(not(dotnet), disable)]
+        pub fn optional_iter<'a>(&'a self, some: bool) -> Option<Box<OpaqueThinIter<'a>>> {
+            if some {
+                Some(Box::new(OpaqueThinIter(self.0.iter())))
+            } else {
+                None
+            }
+        }
+
+        // Ok is owned (no edges), so any keep-alive edges ride on the thrown
+        // exception and its inner error rather than on a success wrapper.
+        #[diplomat::attr(not(dotnet), disable)]
+        pub fn try_borrow<'a>(&'a self, fail: bool) -> Result<i32, Box<BorrowingError<'a>>> {
+            if fail {
+                Err(Box::new(BorrowingError(self)))
+            } else {
+                Ok(i32::try_from(self.0.len()).unwrap())
+            }
+        }
+    }
+
+    // A borrowing opaque error: a non-owning reference into the Vec it came
+    // from, so a caught exception must root that owner or reads back through
+    // the borrow would dangle.
+    #[diplomat::attr(not(dotnet), disable)]
+    #[diplomat::opaque]
+    pub struct BorrowingError<'a>(&'a OpaqueThinVec);
+
+    impl<'a> BorrowingError<'a> {
+        // A real non-owning view into the owner's storage rather than a
+        // copied-out value, so reads go through the live borrow into the owner.
+        pub fn owner_first<'b>(&'b self) -> Option<&'b OpaqueThin> {
+            let owner = self.0;
+            owner.0.first().map(OpaqueThin::transparent_convert)
+        }
+    }
+
+    // GC-race probe for the GC.KeepAlive fix: `drops_during_spin` sleeps without
+    // touching `self`, then reports drops during the call — >= 1 means the
+    // receiver was finalized mid-call (the UAF). dotnet-only to avoid churning
+    // other backends.
+    #[diplomat::attr(not(dotnet), disable)]
+    #[diplomat::opaque]
+    pub struct GcRaceProbe(u64);
+
+    impl GcRaceProbe {
+        pub fn create() -> Box<Self> {
+            Box::new(GcRaceProbe(0))
+        }
+
+        pub fn drops_during_spin(&self, millis: u64) -> u64 {
+            let before = super::PROBE_DROPS.load(super::Ordering::SeqCst);
+            std::thread::sleep(std::time::Duration::from_millis(millis));
+            super::PROBE_DROPS.load(super::Ordering::SeqCst) - before
+        }
+    }
+}
+
+// Bumped by GcRaceProbe's Drop. Outside the bridge so the macro doesn't see it.
+pub(crate) static PROBE_DROPS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+pub(crate) use std::sync::atomic::Ordering;
+
+impl Drop for ffi::GcRaceProbe {
+    fn drop(&mut self) {
+        PROBE_DROPS.fetch_add(1, Ordering::SeqCst);
     }
 }
 

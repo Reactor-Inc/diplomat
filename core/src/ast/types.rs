@@ -1,7 +1,7 @@
 use proc_macro2::Span;
 use quote::{ToTokens, TokenStreamExt};
 use serde::{Deserialize, Serialize};
-use syn::Token;
+use syn::{spanned::Spanned, Token};
 
 use std::fmt;
 use std::ops::ControlFlow;
@@ -11,7 +11,14 @@ use super::{
     Attrs, Docs, Enum, Ident, Lifetime, LifetimeEnv, LifetimeTransitivity, Method, NamedLifetime,
     OpaqueType, Path, RustLink, Struct, Trait,
 };
-use crate::{ast::Function, Env};
+use crate::{
+    ast::{
+        idents::{FromWithSpan, IntoWithSpan, SpanLocation},
+        logging::{create_report, create_simple_report, AstReport, ContextLocation},
+        Function,
+    },
+    Env,
+};
 
 /// A type declared inside a Diplomat-annotated module.
 #[derive(Clone, Serialize, Debug, Hash, PartialEq, Eq)]
@@ -147,8 +154,8 @@ impl PathType {
     /// The reason this function exists though is so when we convert the fields' types
     /// to `PathType`s, we don't panic. We don't actually need to write the struct's
     /// field types expanded in the macro, so this function is more for correctness,
-    pub fn extract_self_type(strct: &syn::ItemStruct) -> Self {
-        let self_name = (&strct.ident).into();
+    pub fn extract_self_type(strct: &syn::ItemStruct, module_location: &SpanLocation) -> Self {
+        let self_name = (&strct.ident).spanned_into(module_location);
 
         PathType {
             path: Path {
@@ -157,7 +164,7 @@ impl PathType {
             lifetimes: strct
                 .generics
                 .lifetimes()
-                .map(|lt_def| (&lt_def.lifetime).into())
+                .map(|lt_def| (&lt_def.lifetime).spanned_into(module_location))
                 .collect(),
         }
     }
@@ -194,32 +201,53 @@ impl PathType {
                         if i == local_path.elements.len() - 1 {
                             return (cur_path, t);
                         } else {
-                            panic!(
-                                "Unexpected custom type when resolving symbol {} in {}",
-                                o,
-                                cur_path.elements.join("::")
-                            )
+                            create_simple_report(
+                                elem.clone(),
+                                "Unexpected custom type found".into(),
+                                format!("Could not resolve {o}"),
+                            );
                         }
                     }
                     Some(ModSymbol::Trait(trt)) => {
-                        panic!("Found trait {} but expected a type", trt.name);
+                        create_simple_report(
+                            elem.clone(),
+                            "Found trait, but expected a type".into(),
+                            format!("Found trait {}", trt.name),
+                        );
                     }
                     Some(ModSymbol::Function(f)) => {
-                        panic!("Found function {} but expected a type", f.name);
+                        create_simple_report(
+                            elem.clone(),
+                            "Found function, but expected a type".into(),
+                            format!("Found function {}", f.name),
+                        );
                     }
-                    None => panic!(
-                        "Could not resolve symbol {} in {}",
-                        o,
-                        cur_path.elements.join("::")
-                    ),
+                    None => {
+                        create_simple_report(
+                            elem.clone(),
+                            "Could not resolve symbol".into(),
+                            format!("Could not resolve {o}"),
+                        );
+                    }
                 },
             }
         }
 
-        panic!(
-            "Path {} does not point to a custom type",
-            in_path.elements.join("::")
-        )
+        let sp = if let Some(f) = in_path.elements.last() {
+            f.span()
+        } else {
+            None
+        };
+
+        create_report(AstReport::new(
+            "Path does not point to a custom type.".into(),
+            sp,
+            format!(
+                "{} must point to a custom type",
+                in_path.elements.join("::")
+            ),
+            vec![],
+        ));
     }
 
     /// If this is a [`TypeName::Named`], grab the [`CustomType`] it points to from
@@ -257,19 +285,33 @@ impl PathType {
                 if i == local_path.elements.len() - 1 {
                     return (cur_path, trt.clone());
                 } else {
-                    panic!(
-                        "Unexpected custom trait when resolving symbol {} in {}",
-                        trt.name,
-                        cur_path.elements.join("::")
-                    )
+                    create_simple_report(
+                        elem.clone(),
+                        format!(
+                            "Found unexpected custom trait {} when resolving path",
+                            trt.name
+                        ),
+                        "Trait appears before the end of the path.".into(),
+                    );
                 }
             }
         }
 
-        panic!(
-            "Path {} does not point to a custom trait",
-            in_path.elements.join("::")
-        )
+        let sp = if let Some(f) = in_path.elements.last() {
+            f.span()
+        } else {
+            None
+        };
+
+        create_report(AstReport::new(
+            "Path does not point to a custom trait".into(),
+            sp,
+            format!(
+                "{} must point to a custom type.",
+                in_path.elements.join("::")
+            ),
+            vec![],
+        ));
     }
 
     /// If this is a [`TypeName::Named`], grab the [`CustomType`] it points to from
@@ -282,8 +324,8 @@ impl PathType {
     }
 }
 
-impl From<&syn::TypePath> for PathType {
-    fn from(other: &syn::TypePath) -> Self {
+impl FromWithSpan<&syn::TypePath> for PathType {
+    fn spanned_from(other: &syn::TypePath, module_location: &SpanLocation) -> Self {
         let lifetimes = other
             .path
             .segments
@@ -295,8 +337,20 @@ impl From<&syn::TypePath> for PathType {
                             .args
                             .iter()
                             .map(|generic_arg| match generic_arg {
-                                syn::GenericArgument::Lifetime(lifetime) => lifetime.into(),
-                                _ => panic!("generic type arguments are unsupported (type: {other:?}, arg: {generic_arg:?})"),
+                                syn::GenericArgument::Lifetime(lifetime) => {
+                                    lifetime.spanned_into(module_location)
+                                }
+                                _ => {
+                                    create_report(AstReport::new(
+                                        "Generic type arguments are unsupported".into(),
+                                        Some(other.span().spanned_into(module_location)),
+                                        "Type paths with generic arguments are unsupported.".into(),
+                                        vec![ContextLocation::new(
+                                            generic_arg.span().spanned_into(module_location),
+                                            "Suggestion: remove generic type arguments".into(),
+                                        )],
+                                    ));
+                                }
                             })
                             .collect(),
                     )
@@ -307,57 +361,80 @@ impl From<&syn::TypePath> for PathType {
             .unwrap_or_default();
 
         Self {
-            path: Path::from_syn(&other.path),
+            path: Path::from_syn(&other.path, module_location),
             lifetimes,
         }
     }
 }
 
-impl From<&syn::TraitBound> for PathType {
-    fn from(other: &syn::TraitBound) -> Self {
-        let lifetimes = other
-            .path
-            .segments
-            .last()
-            .and_then(|last| {
-                if let syn::PathArguments::AngleBracketed(angle_generics) = &last.arguments {
-                    Some(
-                        angle_generics
-                            .args
-                            .iter()
-                            .map(|generic_arg| match generic_arg {
-                                syn::GenericArgument::Lifetime(lifetime) => lifetime.into(),
-                                _ => panic!("generic type arguments are unsupported {other:?}"),
-                            })
-                            .collect(),
-                    )
-                } else {
-                    None
-                }
-            })
-            .unwrap_or_default();
-
-        Self {
-            path: Path::from_syn(&other.path),
-            lifetimes,
-        }
-    }
-}
-
-impl From<&syn::Signature> for PathType {
-    fn from(other: &syn::Signature) -> Self {
+impl FromWithSpan<&syn::Signature> for PathType {
+    fn spanned_from(other: &syn::Signature, module_location: &SpanLocation) -> Self {
         let lifetimes = other
             .generics
             .params
             .iter()
             .map(|generic_arg| match generic_arg {
-                syn::GenericParam::Lifetime(lt) => (&lt.lifetime).into(),
-                _ => panic!("generic type arguments are unsupported {other:?}"),
+                syn::GenericParam::Lifetime(lt) => (&lt.lifetime).spanned_into(module_location),
+                _ => {
+                    create_report(AstReport::new(
+                        "Generic type arguments are unsupported".into(),
+                        Some(other.ident.span().spanned_into(module_location)),
+                        "Functions with generic arguments are unsupported".into(),
+                        vec![ContextLocation::new(
+                            generic_arg.span().spanned_into(module_location),
+                            "Suggestion: remove generic type arguments.".into(),
+                        )],
+                    ));
+                }
             })
             .collect();
 
         Self {
-            path: Path::empty().sub_path((&other.ident).into()),
+            path: Path::empty().sub_path((&other.ident).spanned_into(module_location)),
+            lifetimes,
+        }
+    }
+}
+
+impl FromWithSpan<&syn::TraitBound> for PathType {
+    fn spanned_from(other: &syn::TraitBound, module_location: &SpanLocation) -> Self {
+        let lifetimes = other
+            .path
+            .segments
+            .last()
+            .and_then(|last| {
+                if let syn::PathArguments::AngleBracketed(angle_generics) = &last.arguments {
+                    Some(
+                        angle_generics
+                            .args
+                            .iter()
+                            .map(|generic_arg| match generic_arg {
+                                syn::GenericArgument::Lifetime(lifetime) => {
+                                    lifetime.spanned_into(module_location)
+                                }
+                                _ => {
+                                    create_report(AstReport::new(
+                                        "Generic type arguments are unsupported".into(),
+                                        Some(other.span().spanned_into(module_location)),
+                                        "Trait bounds with generic arguments are unsupported"
+                                            .into(),
+                                        vec![ContextLocation::new(
+                                            generic_arg.span().spanned_into(module_location),
+                                            "Suggestion: remove generic type arguments.".into(),
+                                        )],
+                                    ));
+                                }
+                            })
+                            .collect(),
+                    )
+                } else {
+                    None
+                }
+            })
+            .unwrap_or_default();
+
+        Self {
+            path: Path::from_syn(&other.path, module_location),
             lifetimes,
         }
     }
@@ -568,12 +645,12 @@ impl StringEncoding {
     }
 }
 
-fn get_lifetime_from_syn_path(p: &syn::TypePath) -> Lifetime {
+fn get_lifetime_from_syn_path(p: &syn::TypePath, module_location: &SpanLocation) -> Lifetime {
     if let syn::PathArguments::AngleBracketed(ref generics) =
         p.path.segments[p.path.segments.len() - 1].arguments
     {
         if let Some(syn::GenericArgument::Lifetime(lt)) = generics.args.first() {
-            return Lifetime::from(lt);
+            return Lifetime::spanned_from(lt, module_location);
         }
     }
     Lifetime::Anonymous
@@ -761,16 +838,25 @@ impl TypeName {
     /// - If the type is a owned or borrowed slice of a Rust primitive, returns a [`TypeName::PrimitiveSlice`]
     /// - If the type is a reference (`&` or `&mut`), returns a [`TypeName::Reference`] with the referenced type recursively converted
     /// - Otherwise, assume that the reference is to a [`CustomType`] in either the current module or another one, returns a [`TypeName::Named`]
-    pub fn from_syn(ty: &syn::Type, self_path_type: Option<PathType>) -> TypeName {
+    pub fn from_syn(
+        ty: &syn::Type,
+        self_path_type: Option<PathType>,
+        module_location: &SpanLocation,
+    ) -> TypeName {
         match ty {
             syn::Type::Reference(r) => {
-                let lifetime = Lifetime::from(&r.lifetime);
+                let lifetime = Lifetime::spanned_from(&r.lifetime, module_location);
                 let mutability = Mutability::from_syn(&r.mutability);
 
                 let name = r.elem.to_token_stream().to_string();
                 if name.starts_with("DiplomatStr") || name == "str" {
                     if mutability.is_mutable() {
-                        panic!("mutable string references are disallowed");
+                        create_report(AstReport::new(
+                            "Mutable string references disallowed".into(),
+                            Some(r.elem.span().spanned_into(module_location)),
+                            "Suggestion: make reference immutable".into(),
+                            vec![],
+                        ));
                     }
                     if name == "DiplomatStr" {
                         return TypeName::StrReference(
@@ -810,22 +896,35 @@ impl TypeName {
                         Some(Lifetime::Anonymous),
                         encoding,
                         is_stdlib_type,
-                    ) = TypeName::from_syn(&slice.elem, self_path_type.clone())
+                    ) = TypeName::from_syn(&slice.elem, self_path_type.clone(), module_location)
                     {
                         if is_stdlib_type == StdlibOrDiplomat::Stdlib {
-                            panic!("Slice-of-slice is only supported with DiplomatRuntime slice types (DiplomatStrSlice, DiplomatStr16Slice, DiplomatUtf8StrSlice)");
+                            create_report(AstReport::new(
+                                "String slice-of-slice is only supported with DiplomatRuntime slice types".into(),
+                                Some(slice.elem.span().spanned_into(module_location)),
+                                "Supported slice types: DiplomatStrSlice, DiplomatStr16Slice, DiplomatUtf8StrSlice.".into(),
+                                vec![]
+                            ));
                         }
                         return TypeName::StrSlice(encoding, StdlibOrDiplomat::Stdlib);
                     }
                     return TypeName::CustomTypeSlice(
                         Some((lifetime, mutability)),
-                        Box::new(TypeName::from_syn(slice.elem.as_ref(), self_path_type)),
+                        Box::new(TypeName::from_syn(
+                            slice.elem.as_ref(),
+                            self_path_type,
+                            module_location,
+                        )),
                     );
                 }
                 TypeName::Reference(
                     lifetime,
                     mutability,
-                    Box::new(TypeName::from_syn(r.elem.as_ref(), self_path_type)),
+                    Box::new(TypeName::from_syn(
+                        r.elem.as_ref(),
+                        self_path_type,
+                        module_location,
+                    )),
                 )
             }
             syn::Type::Path(p) => {
@@ -849,11 +948,16 @@ impl TypeName {
                             &type_args.args[0]
                         {
                             if let TypeName::Primitive(p) =
-                                TypeName::from_syn(&slice.elem, self_path_type)
+                                TypeName::from_syn(&slice.elem, self_path_type, module_location)
                             {
                                 TypeName::PrimitiveSlice(None, p, StdlibOrDiplomat::Stdlib)
                             } else {
-                                panic!("Owned slices only support primitives.")
+                                create_report(AstReport::new(
+                                    "Owned slices only support primitives".into(),
+                                    Some(slice.elem.span().spanned_into(module_location)),
+                                    "".into(),
+                                    vec![],
+                                ));
                             }
                         } else if let syn::GenericArgument::Type(tpe) = &type_args.args[0] {
                             if tpe.to_token_stream().to_string() == "DiplomatStr" {
@@ -875,13 +979,34 @@ impl TypeName {
                                     StdlibOrDiplomat::Stdlib,
                                 )
                             } else {
-                                TypeName::Box(Box::new(TypeName::from_syn(tpe, self_path_type)))
+                                TypeName::Box(Box::new(TypeName::from_syn(
+                                    tpe,
+                                    self_path_type,
+                                    module_location,
+                                )))
                             }
                         } else {
-                            panic!("Expected first type argument for Box to be a type")
+                            create_report(AstReport::new(
+                                "Expected a type in Box type arg".into(),
+                                Some(type_args.span().spanned_into(module_location)),
+                                "Should be a type".into(),
+                                vec![],
+                            ));
                         }
                     } else {
-                        panic!("Expected angle brackets for Box type")
+                        let suggestion = match &p.path.segments[0].arguments {
+                            syn::PathArguments::None => "add angle brackets",
+                            syn::PathArguments::Parenthesized(..) => {
+                                "replace parentheses with angle brackets"
+                            }
+                            _ => unreachable!(),
+                        };
+                        create_report(AstReport::new(
+                            "Expected angle brackets for Box type".into(),
+                            Some(p.path.segments[0].span().spanned_into(module_location)),
+                            format!("Suggestion: {suggestion}"),
+                            vec![],
+                        ));
                     }
                 } else if p_len == 1 && p.path.segments[0].ident == "Option"
                     || is_runtime_type(p, "DiplomatOption")
@@ -896,19 +1021,37 @@ impl TypeName {
                                 StdlibOrDiplomat::Diplomat
                             };
                             TypeName::Option(
-                                Box::new(TypeName::from_syn(tpe, self_path_type)),
+                                Box::new(TypeName::from_syn(tpe, self_path_type, module_location)),
                                 stdlib,
                             )
                         } else {
-                            panic!("Expected first type argument for Option to be a type")
+                            create_report(AstReport::new(
+                                "Expected first argument for Option to be a type".into(),
+                                Some(type_args.span().spanned_into(module_location)),
+                                "Should be a type".into(),
+                                vec![],
+                            ));
                         }
                     } else {
-                        panic!("Expected angle brackets for Option type")
+                        let suggestion = match &p.path.segments[0].arguments {
+                            syn::PathArguments::None => "add angle brackets",
+                            syn::PathArguments::Parenthesized(..) => {
+                                "replace parentheses with angle brackets"
+                            }
+                            _ => unreachable!(),
+                        };
+                        create_report(AstReport::new(
+                            "Expected angle brackets for Option type".into(),
+                            Some(p.path.segments[0].span().spanned_into(module_location)),
+                            format!("Suggestion: {suggestion}"),
+                            vec![],
+                        ));
                     }
                 } else if p_len == 1 && p.path.segments[0].ident == "Self" {
                     if let Some(self_path_type) = self_path_type {
                         TypeName::SelfType(self_path_type)
                     } else {
+                        // Note that this is currently unreachable, we never provide any value to `self_path_type` other than `Some`.
                         panic!("Cannot have `Self` type outside of a method");
                     }
                 } else if is_runtime_type(p, "DiplomatOwnedStrSlice")
@@ -928,7 +1071,7 @@ impl TypeName {
                     || is_runtime_type(p, "DiplomatStr16Slice")
                     || is_runtime_type(p, "DiplomatUtf8StrSlice")
                 {
-                    let lt = get_lifetime_from_syn_path(p);
+                    let lt = get_lifetime_from_syn_path(p, module_location);
 
                     let encoding = if is_runtime_type(p, "DiplomatStrSlice") {
                         StringEncoding::UnvalidatedUtf8
@@ -946,7 +1089,7 @@ impl TypeName {
                     let ltmut = if is_runtime_type(p, "DiplomatOwnedSlice") {
                         None
                     } else {
-                        let lt = get_lifetime_from_syn_path(p);
+                        let lt = get_lifetime_from_syn_path(p, module_location);
                         let mutability = if is_runtime_type(p, "DiplomatSlice") {
                             Mutability::Immutable
                         } else {
@@ -955,7 +1098,14 @@ impl TypeName {
                         Some((lt, mutability))
                     };
 
-                    let ty = get_ty_from_syn_path(p).expect("Expected type argument to DiplomatSlice/DiplomatSliceMut/DiplomatOwnedSlice");
+                    let ty = get_ty_from_syn_path(p).unwrap_or_else(|| {
+                        create_report(AstReport::new(
+                            "Expected type argument".into(),
+                            Some(p.span().spanned_into(module_location)),
+                            "Add slice type specification here".into(),
+                            vec![],
+                        ));
+                    });
 
                     if let syn::Type::Path(p) = &ty {
                         if let Some(ident) = p.path.get_ident() {
@@ -992,23 +1142,29 @@ impl TypeName {
                             }
                         }
                     }
-                    panic!("Found DiplomatSlice/DiplomatSliceMut/DiplomatOwnedSlice without primitive or DiplomatStrSlice-like generic");
+                    create_report(AstReport::new(
+                        "Found DiplomatSlice without primitive or DiplomatSlice-like generic"
+                            .into(),
+                        Some(ty.span().spanned_into(module_location)),
+                        "Must be a primitive or DiplomatSlice-like generic".into(),
+                        vec![],
+                    ));
                 } else if p_len == 1 && p.path.segments[0].ident == "Result"
                     || is_runtime_type(p, "DiplomatResult")
                 {
                     if let syn::PathArguments::AngleBracketed(type_args) =
                         &p.path.segments.last().unwrap().arguments
                     {
-                        assert!(
-                            type_args.args.len() > 1,
-                            "Not enough arguments given to Result<T,E>. Are you using a non-std Result type?"
-                        );
+                        if type_args.args.len() != 2 {
+                            create_simple_report((&p.path.segments.last().unwrap().ident).spanned_into(module_location), "Not enough arguments given to Result<T,E>. Are you using a non-std Result type?".into(), "Expected 2 generic arguments.".into());
+                        }
 
                         if let (syn::GenericArgument::Type(ok), syn::GenericArgument::Type(err)) =
                             (&type_args.args[0], &type_args.args[1])
                         {
-                            let ok = TypeName::from_syn(ok, self_path_type.clone());
-                            let err = TypeName::from_syn(err, self_path_type);
+                            let ok =
+                                TypeName::from_syn(ok, self_path_type.clone(), module_location);
+                            let err = TypeName::from_syn(err, self_path_type, module_location);
                             TypeName::Result(
                                 Box::new(ok),
                                 Box::new(err),
@@ -1019,22 +1175,58 @@ impl TypeName {
                                 },
                             )
                         } else {
-                            panic!("Expected both type arguments for Result to be a type")
+                            let mut locations = vec![];
+                            if !matches!(&type_args.args[0], syn::GenericArgument::Type(..)) {
+                                locations.push(ContextLocation::new(
+                                    type_args.args[0].span().spanned_into(module_location),
+                                    "Must be a type arg".into(),
+                                ));
+                            }
+                            if !matches!(&type_args.args[1], syn::GenericArgument::Type(..)) {
+                                locations.push(ContextLocation::new(
+                                    type_args.args[1].span().spanned_into(module_location),
+                                    "Must be a type arg".into(),
+                                ));
+                            }
+                            create_report(AstReport::new(
+                                "Expected both type arguments for Result to be a type".into(),
+                                Some(type_args.span().spanned_into(module_location)),
+                                "".into(),
+                                locations,
+                            ));
                         }
                     } else {
-                        panic!("Expected angle brackets for Result type")
+                        let args = &p.path.segments.last().unwrap().arguments;
+                        let suggestion = match args {
+                            syn::PathArguments::None => "add angle brackets",
+                            syn::PathArguments::Parenthesized(..) => {
+                                "replace parentheses with angle brackets"
+                            }
+                            _ => unreachable!(),
+                        };
+                        create_report(AstReport::new(
+                            "Expected angle brackets for Result type".into(),
+                            Some(p.path.segments.span().spanned_into(module_location)),
+                            format!("Suggestion: {suggestion}"),
+                            vec![],
+                        ));
                     }
                 } else if is_runtime_type(p, "DiplomatWrite") {
                     TypeName::Write
                 } else {
-                    TypeName::Named(PathType::from(p))
+                    TypeName::Named(p.spanned_into(module_location))
                 }
             }
             syn::Type::Tuple(tup) => {
                 if tup.elems.is_empty() {
                     TypeName::Unit
                 } else {
-                    todo!("Tuples are not currently supported: https://github.com/rust-diplomat/diplomat/issues/1142")
+                    create_report(AstReport::new(
+                        "Tuples unsupported".into(),
+                        Some(tup.span().spanned_into(module_location)),
+                        "https://github.com/rust-diplomat/diplomat/issues/1142".into(),
+                        vec![],
+                    ));
                 }
             }
             syn::Type::ImplTrait(tr) => {
@@ -1043,7 +1235,12 @@ impl TypeName {
                     match trait_bound {
                         syn::TypeParamBound::Trait(syn::TraitBound { path: p, .. }) => {
                             if ret_type.is_some() {
-                                todo!("Currently don't support implementing multiple traits");
+                                create_report(AstReport::new(
+                                    "Implementing multiple traits currently unsupported".into(),
+                                    Some(trait_bound.span().spanned_into(module_location)),
+                                    "Suggestion: remove extra trait bound".into(),
+                                    vec![],
+                                ));
                             }
                             let rel_segs = &p.segments;
                             let path_seg = &rel_segs[0];
@@ -1074,7 +1271,20 @@ impl TypeName {
                                             ..
                                         }) = input_type
                                         {
-                                            panic!("Lifetimes are not allowed on callback parameters: lifetime '{} on trait {} ", in_lifetime.ident, path_seg.ident);
+                                            create_report(AstReport::new(
+                                                "Lifetimes are not allowed on callback parameters"
+                                                    .into(),
+                                                Some(
+                                                    in_lifetime
+                                                        .span()
+                                                        .spanned_into(module_location),
+                                                ),
+                                                "Suggestion: remove lifetime".into(),
+                                                vec![ContextLocation::new(
+                                                    path_seg.span().spanned_into(module_location),
+                                                    "Defined on trait".into(),
+                                                )],
+                                            ));
                                         }
                                     }
 
@@ -1084,13 +1294,18 @@ impl TypeName {
                                             Box::new(TypeName::from_syn(
                                                 in_ty,
                                                 self_path_type.clone(),
+                                                module_location,
                                             ))
                                         })
                                         .collect::<Vec<Box<TypeName>>>();
 
                                     let out_type = match output_type {
                                         syn::ReturnType::Type(_, output_type) => {
-                                            TypeName::from_syn(output_type, self_path_type.clone())
+                                            TypeName::from_syn(
+                                                output_type,
+                                                self_path_type.clone(),
+                                                module_location,
+                                            )
                                         }
                                         syn::ReturnType::Default => TypeName::Unit,
                                     };
@@ -1104,32 +1319,56 @@ impl TypeName {
                                     ));
                                     continue;
                                 }
-                                panic!("Unsupported function type: {:?}", &path_seg.arguments);
+                                create_report(AstReport::new(
+                                    "Unsupported function type".into(),
+                                    Some(path_seg.span().spanned_into(module_location)),
+                                    "Expected parentheses".into(),
+                                    vec![],
+                                ));
                             } else {
-                                ret_type =
-                                    Some(TypeName::ImplTrait(PathType::from(&syn::TraitBound {
+                                ret_type = Some(TypeName::ImplTrait(
+                                    (&syn::TraitBound {
                                         paren_token: None,
                                         modifier: syn::TraitBoundModifier::None,
                                         lifetimes: None, // todo this is an assumption
                                         path: p.clone(),
-                                    })));
+                                    })
+                                        .spanned_into(module_location),
+                                ));
                                 continue;
                             }
                         }
                         syn::TypeParamBound::Lifetime(syn::Lifetime { ident, .. }) => {
-                            assert_eq!(
-                                ident, "static",
-                                "only 'static lifetimes are supported on trait objects for now"
-                            );
+                            if ident != "static" {
+                                create_report(AstReport::new(
+                                    "Found non-static lifetime on trait".into(),
+                                    Some(ident.span().spanned_into(module_location)),
+                                    "Only 'static lifetimes are supported on trait objects right now.".into(),
+                                    vec![]
+                                ));
+                            }
                         }
                         _ => {
-                            panic!("Unsupported trait component: {trait_bound:?}");
+                            create_report(AstReport::new(
+                                "Unsupported trait bound".into(),
+                                Some(trait_bound.span().spanned_into(module_location)),
+                                "Expected lifetime or trait name.".into(),
+                                vec![],
+                            ));
                         }
                     }
                 }
+                // `.expect` currently unreachable, as we either error before this point or set ret_type to be Some.
                 ret_type.expect("No valid traits found")
             }
-            other => panic!("Unsupported type: {}", other.to_token_stream()),
+            other => {
+                create_report(AstReport::new(
+                    "Found unsupported type".into(),
+                    Some(other.span().spanned_into(module_location)),
+                    "See a list of the types Diplomat supports: https://rust-diplomat.github.io/diplomat/types.html".into(),
+                    vec![]
+                ));
+            }
         }
     }
 
@@ -1587,6 +1826,8 @@ mod tests {
 
     use syn;
 
+    use crate::ast::idents::SpanLocation;
+
     use super::TypeName;
 
     #[test]
@@ -1595,21 +1836,24 @@ mod tests {
             &syn::parse_quote! {
                 i32
             },
-            None
+            None,
+            &SpanLocation::None
         ));
 
         insta::assert_yaml_snapshot!(TypeName::from_syn(
             &syn::parse_quote! {
                 usize
             },
-            None
+            None,
+            &SpanLocation::None
         ));
 
         insta::assert_yaml_snapshot!(TypeName::from_syn(
             &syn::parse_quote! {
                 bool
             },
-            None
+            None,
+            &SpanLocation::None
         ));
     }
 
@@ -1619,7 +1863,8 @@ mod tests {
             &syn::parse_quote! {
                 MyLocalStruct
             },
-            None
+            None,
+            &SpanLocation::None
         ));
     }
 
@@ -1629,14 +1874,16 @@ mod tests {
             &syn::parse_quote! {
                 &i32
             },
-            None
+            None,
+            &SpanLocation::None
         ));
 
         insta::assert_yaml_snapshot!(TypeName::from_syn(
             &syn::parse_quote! {
                 &mut MyLocalStruct
             },
-            None
+            None,
+            &SpanLocation::None
         ));
     }
 
@@ -1646,14 +1893,16 @@ mod tests {
             &syn::parse_quote! {
                 Box<i32>
             },
-            None
+            None,
+            &SpanLocation::None
         ));
 
         insta::assert_yaml_snapshot!(TypeName::from_syn(
             &syn::parse_quote! {
                 Box<MyLocalStruct>
             },
-            None
+            None,
+            &SpanLocation::None
         ));
     }
 
@@ -1663,14 +1912,16 @@ mod tests {
             &syn::parse_quote! {
                 Option<i32>
             },
-            None
+            None,
+            &SpanLocation::None
         ));
 
         insta::assert_yaml_snapshot!(TypeName::from_syn(
             &syn::parse_quote! {
                 Option<MyLocalStruct>
             },
-            None
+            None,
+            &SpanLocation::None
         ));
     }
 
@@ -1680,28 +1931,32 @@ mod tests {
             &syn::parse_quote! {
                 DiplomatResult<MyLocalStruct, i32>
             },
-            None
+            None,
+            &SpanLocation::None
         ));
 
         insta::assert_yaml_snapshot!(TypeName::from_syn(
             &syn::parse_quote! {
                 DiplomatResult<(), MyLocalStruct>
             },
-            None
+            None,
+            &SpanLocation::None
         ));
 
         insta::assert_yaml_snapshot!(TypeName::from_syn(
             &syn::parse_quote! {
                 Result<MyLocalStruct, i32>
             },
-            None
+            None,
+            &SpanLocation::None
         ));
 
         insta::assert_yaml_snapshot!(TypeName::from_syn(
             &syn::parse_quote! {
                 Result<(), MyLocalStruct>
             },
-            None
+            None,
+            &SpanLocation::None
         ));
     }
 
@@ -1711,84 +1966,96 @@ mod tests {
             &syn::parse_quote! {
                 Foo<'a, 'b>
             },
-            None
+            None,
+            &SpanLocation::None
         ));
 
         insta::assert_yaml_snapshot!(TypeName::from_syn(
             &syn::parse_quote! {
                 ::core::my_type::Foo
             },
-            None
+            None,
+            &SpanLocation::None
         ));
 
         insta::assert_yaml_snapshot!(TypeName::from_syn(
             &syn::parse_quote! {
                 ::core::my_type::Foo<'test>
             },
-            None
+            None,
+            &SpanLocation::None
         ));
 
         insta::assert_yaml_snapshot!(TypeName::from_syn(
             &syn::parse_quote! {
                 Option<Ref<'object>>
             },
-            None
+            None,
+            &SpanLocation::None
         ));
 
         insta::assert_yaml_snapshot!(TypeName::from_syn(
             &syn::parse_quote! {
                 Foo<'a, 'b, 'c, 'd>
             },
-            None
+            None,
+            &SpanLocation::None
         ));
 
         insta::assert_yaml_snapshot!(TypeName::from_syn(
             &syn::parse_quote! {
                 very::long::path::to::my::Type<'x, 'y, 'z>
             },
-            None
+            None,
+            &SpanLocation::None
         ));
 
         insta::assert_yaml_snapshot!(TypeName::from_syn(
             &syn::parse_quote! {
                 Result<OkRef<'a, 'b>, ErrRef<'c>>
             },
-            None
+            None,
+            &SpanLocation::None
         ));
 
         insta::assert_yaml_snapshot!(TypeName::from_syn(
             &syn::parse_quote! {
                 DiplomatSlice<'a, u16>
             },
-            None
+            None,
+            &SpanLocation::None
         ));
 
         insta::assert_yaml_snapshot!(TypeName::from_syn(
             &syn::parse_quote! {
                 DiplomatOwnedSlice<i8>
             },
-            None
+            None,
+            &SpanLocation::None
         ));
 
         insta::assert_yaml_snapshot!(TypeName::from_syn(
             &syn::parse_quote! {
                 DiplomatSliceStr<'a>
             },
-            None
+            None,
+            &SpanLocation::None
         ));
 
         insta::assert_yaml_snapshot!(TypeName::from_syn(
             &syn::parse_quote! {
                 DiplomatSliceMut<'a, f32>
             },
-            None
+            None,
+            &SpanLocation::None
         ));
 
         insta::assert_yaml_snapshot!(TypeName::from_syn(
             &syn::parse_quote! {
                 DiplomatSlice<i32>
             },
-            None
+            None,
+            &SpanLocation::None
         ));
     }
 }

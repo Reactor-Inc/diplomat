@@ -1,5 +1,9 @@
 use serde::Serialize;
 
+use crate::ast::idents::IntoWithSpan;
+use crate::ast::logging::create_simple_report;
+use crate::ast::SpanLocation;
+
 use super::docs::Docs;
 use super::{AttrInheritContext, Attrs, Ident, Method};
 use quote::ToTokens;
@@ -18,14 +22,18 @@ pub struct Enum {
 
 impl Enum {
     /// Extract an [`Enum`] metadata value from an AST node.
-    pub fn new(enm: &syn::ItemEnum, parent_attrs: &Attrs) -> Enum {
+    pub fn new(enm: &syn::ItemEnum, parent_attrs: &Attrs, module_location: &SpanLocation) -> Enum {
         let mut last_discriminant = -1;
         if !enm.generics.params.is_empty() {
             // Generic types are not allowed.
             // Assuming all enums cannot have lifetimes? We don't even have a
             // `lifetimes` field. If we change our minds we can adjust this later
             // and update the `CustomType::lifetimes` API accordingly.
-            panic!("Enums cannot have generic parameters");
+            create_simple_report(
+                (&enm.ident).spanned_into(module_location),
+                "Enums cannot have generic parameters.".into(),
+                "Suggestion: remove generics".into(),
+            );
         }
 
         let mut attrs = parent_attrs.clone();
@@ -33,14 +41,18 @@ impl Enum {
         let variant_parent_attrs = attrs.attrs_for_inheritance(AttrInheritContext::Variant);
 
         Enum {
-            name: (&enm.ident).into(),
+            name: (&enm.ident).spanned_into(module_location),
             docs: Docs::from_attrs(&enm.attrs),
             variants: enm
                 .variants
                 .iter()
                 .map(|v| {
                     if !matches!(v.fields, syn::Fields::Unit) {
-                        panic!("Enums cannot have fields, we only support C-like enums");
+                        create_simple_report(
+                            (&v.ident).spanned_into(module_location),
+                            "Enums cannot have fields, we only support C-like enums".into(),
+                            "Remove field variant".into(),
+                        );
                     }
                     let new_discriminant = v
                         .discriminant
@@ -52,7 +64,11 @@ impl Enum {
                             if let Ok(syn::Lit::Int(ref lit_int)) = lit {
                                 lit_int.base10_parse::<isize>().unwrap()
                             } else {
-                                panic!("Expected a discriminant to be a constant integer");
+                                create_simple_report(
+                                    (&v.ident).spanned_into(module_location),
+                                    "Enum discriminants must be constant integers".into(),
+                                    "Expected discriminant to be a constant integer".into(),
+                                );
                             }
                         })
                         .unwrap_or_else(|| last_discriminant + 1);
@@ -61,7 +77,7 @@ impl Enum {
                     let mut v_attrs = variant_parent_attrs.clone();
                     v_attrs.add_attrs(&v.attrs);
                     (
-                        (&v.ident).into(),
+                        (&v.ident).spanned_into(module_location),
                         new_discriminant,
                         Docs::from_attrs(&v.attrs),
                         v_attrs,
@@ -98,7 +114,8 @@ mod tests {
                         Def
                     }
                 },
-                &Default::default()
+                &Default::default(),
+                &crate::ast::SpanLocation::None
             ));
         });
     }
@@ -120,7 +137,8 @@ mod tests {
                         Jkl = 2,
                     }
                 },
-                &Default::default()
+                &Default::default(),
+                &crate::ast::SpanLocation::None
             ));
         });
     }

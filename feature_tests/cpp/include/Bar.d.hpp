@@ -20,12 +20,6 @@ class Foo;
 namespace somelib {
 namespace capi {
     struct Bar;
-
-
-    typedef struct DiplomatBarView {
-      const Bar** data;
-      size_t len;
-    } DiplomatBarView;
 } // namespace capi
 } // namespace
 
@@ -33,7 +27,7 @@ namespace somelib {
 class Bar {
 public:
 
-  inline const somelib::Foo& foo() const;
+  inline const somelib::Foo& foo() const DIPLOMAT_LIFETIME_BOUND;
 
     inline const somelib::capi::Bar* AsFFI() const;
     inline somelib::capi::Bar* AsFFI();

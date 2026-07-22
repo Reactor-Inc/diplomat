@@ -21,7 +21,6 @@ namespace somelib {
 namespace capi {
     struct Float64Vec;
 
-
     typedef struct DiplomatFloat64VecView {
       const Float64Vec** data;
       size_t len;
@@ -47,7 +46,7 @@ public:
 
   inline static std::unique_ptr<somelib::Float64Vec> new_f64_be_bytes(somelib::diplomat::span<const uint8_t> v);
 
-  inline somelib::diplomat::span<const double> as_slice() const;
+  inline somelib::diplomat::span<const double> as_slice() const DIPLOMAT_LIFETIME_BOUND;
 
   inline void fill_slice(somelib::diplomat::span<double> v) const;
 
@@ -57,7 +56,7 @@ public:
   template<typename W>
   inline void to_string_write(W& writeable_output) const;
 
-  inline somelib::diplomat::span<const double> borrow() const;
+  inline somelib::diplomat::span<const double> borrow() const DIPLOMAT_LIFETIME_BOUND;
 
   inline std::optional<double> operator[](size_t i) const;
 

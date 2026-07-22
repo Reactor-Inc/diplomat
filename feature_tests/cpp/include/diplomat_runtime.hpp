@@ -18,6 +18,20 @@
 #include <array>
 #endif
 
+#ifndef DIPLOMAT_LIFETIME_BOUND
+#if defined(__has_cpp_attribute)
+#if __has_cpp_attribute(msvc::lifetimebound)
+#define DIPLOMAT_LIFETIME_BOUND [[msvc::lifetimebound]]
+#elif __has_cpp_attribute(clang::lifetimebound)
+#define DIPLOMAT_LIFETIME_BOUND [[clang::lifetimebound]]
+#endif
+#endif
+#endif
+
+#ifndef DIPLOMAT_LIFETIME_BOUND
+#define DIPLOMAT_LIFETIME_BOUND
+#endif
+
 namespace somelib {
 namespace diplomat {
 
@@ -88,12 +102,16 @@ extern "C" inline void _flush(capi::DiplomatWrite* w) {
   string->resize(w->len);
 }
 
-extern "C" inline bool _grow(capi::DiplomatWrite* w, uintptr_t requested) {
+extern "C" inline bool _grow_impl(capi::DiplomatWrite* w, uintptr_t requested) {
   std::string* string = reinterpret_cast<std::string*>(w->context);
   string->resize(requested);
   w->cap = string->length();
   w->buf = &(*string)[0];
   return true;
+}
+
+extern "C" inline bool _grow(capi::DiplomatWrite* w, size_t requested) {
+  return _grow_impl(w, static_cast<uintptr_t>(requested));
 }
 
 inline capi::DiplomatWrite WriteFromString(std::string& string) {
@@ -550,7 +568,11 @@ template <typename Ret, typename... Args> struct fn_traits<std::function<Ret(Arg
     static T c_run_callback_diplomat_opaque(const void* cb, replace_fn_t<Args>... args) {
       Ret out = c_run_callback(cb, args...);
 
-      return out->AsFFI();
+      if constexpr(std::is_pointer_v<Ret>) {
+        return out->AsFFI();
+      } else {
+        return out.AsFFI();
+      }
     }
 
     static void c_delete(const void *cb) {

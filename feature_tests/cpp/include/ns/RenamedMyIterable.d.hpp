@@ -24,12 +24,6 @@ class RenamedMyIterator;
 namespace somelib::ns {
 namespace capi {
     struct RenamedMyIterable;
-
-
-    typedef struct DiplomatRenamedMyIterableView {
-      const RenamedMyIterable** data;
-      size_t len;
-    } DiplomatRenamedMyIterableView;
 } // namespace capi
 } // namespace
 
@@ -39,7 +33,7 @@ public:
 
   inline static std::unique_ptr<somelib::ns::RenamedMyIterable> new_(somelib::diplomat::span<const uint8_t> x);
 
-  inline std::unique_ptr<somelib::ns::RenamedMyIterator> iter() const;
+  inline std::unique_ptr<somelib::ns::RenamedMyIterator> iter() const DIPLOMAT_LIFETIME_BOUND;
   inline somelib::diplomat::next_to_iter_helper<somelib::ns::RenamedMyIterator> begin() const;
   inline std::nullopt_t end() const { return std::nullopt; }
 

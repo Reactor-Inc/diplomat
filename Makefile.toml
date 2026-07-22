@@ -59,6 +59,10 @@ dependencies = ["test-kotlin-example", "test-kotlin-feature"]
 category = "Tests"
 dependencies = ["test-kotlin-feature-mvn"]
 
+[tasks.test-dotnet]
+category = "Tests"
+dependencies = ["test-dotnet-feature"]
+
 [tasks.test-nanobind]
 category = "Tests"
 dependencies = ["test-nanobind-feature"]
@@ -83,6 +87,7 @@ dependencies = [
     "test-dart-feature",
     "test-kotlin-feature",
     "test-nanobind-feature",
+    "test-dotnet-feature",
 ]
 
 [tasks.test-cpp-example]
@@ -244,6 +249,17 @@ exit_on_error true
 exec --fail-on-error uvx --with feature_tests/nanobind --refresh-package somelib pytest feature_tests/nanobind/test/
 '''
 
+[tasks.test-dotnet-feature]
+category = "Tests"
+# build-feature produces the `diplomat_feature_tests` cdylib that the
+# generated [DllImport]s load; the csproj copies it next to the test binary.
+dependencies = ["build-feature"]
+script_runner = "@duckscript"
+script = '''
+exit_on_error true
+exec --fail-on-error dotnet test feature_tests/dotnet/Somelib.FeatureTests.csproj
+'''
+
 [tasks.check-c-example]
 category = "Tests"
 script_runner = "@duckscript"
@@ -392,6 +408,7 @@ dependencies = [
     "gen-dart-feature",
     "gen-kotlin-feature",
     "gen-nanobind-feature",
+    "gen-dotnet-feature",
 ]
 
 [tasks.gen-example]
@@ -403,6 +420,7 @@ dependencies = [
     "gen-demo-example",
     "gen-dart-example",
     "gen-kotlin-example",
+    "gen-dotnet-example",
 ]
 
 
@@ -423,6 +441,10 @@ dependencies = ["gen-kotlin-feature", "gen-kotlin-example"]
 [tasks.gen-js]
 category = "Code generation"
 dependencies = ["gen-js-feature", "gen-js-example"]
+
+[tasks.gen-dotnet]
+category = "Code generation"
+dependencies = ["gen-dotnet-feature", "gen-dotnet-example"]
 
 [tasks.gen-c-feature]
 category = "Code generation"
@@ -508,6 +530,26 @@ exit_on_error true
 generate_generic feature_tests dart lib/src
 '''
 
+[tasks.gen-dotnet-example]
+category = "Code generation"
+script_runner = "@duckscript"
+script = '''
+exit_on_error true
+!include_files ./support/functions.ds
+generate_generic example dotnet Generated
+'''
+
+[tasks.gen-dotnet-feature]
+category = "Code generation"
+script_runner = "@duckscript"
+script = '''
+exit_on_error true
+!include_files ./support/functions.ds
+# Only the Generated/ folder is overwritten; the hand-written test project
+# (Somelib.FeatureTests.csproj + Tests/) lives alongside it and is preserved.
+generate_generic feature_tests dotnet Generated
+'''
+
 [tasks.gen-dart-example]
 category = "Code generation"
 script_runner = "@duckscript"
@@ -539,18 +581,41 @@ generate_generic example kotlin somelib "--config kotlin.scaffold=false" /src/ma
 
 [tasks.gen-nanobind-feature]
 category = "Code generation"
+run_task = [
+    { name = ["gen-nanobind-bindings", "gen-nanobind-stubs"] }
+]
+
+[tasks.gen-nanobind-bindings]
+category = "Code generation"
+dependencies = ["fetch-nanobind"]
 script_runner = "@duckscript"
 script = '''
 exit_on_error true
 !include_files ./support/functions.ds
-generate_generic feature_tests nanobind src/cpp 
-mv nanobind/src/cpp/somelib_ext.cpp nanobind/src/somelib_ext.cpp
-rm -rf nanobind/src/include
-mv nanobind/src/cpp/include nanobind/src/
-rm -fr nanobind/src/sub_modules
-mv nanobind/src/cpp/sub_modules nanobind/src/
-rm -rf nanobind/src/cpp/
+
+generate_generic feature_tests nanobind src
 '''
+
+[tasks.gen-nanobind-stubs]
+category = "Code generation"
+dependencies = ["fetch-nanobind"]
+script_runner = "@duckscript"
+script = '''
+exit_on_error true
+
+rm -r feature_tests/nanobind/src/somelib
+
+cd feature_tests/nanobind
+
+# Build the lib so that Nanobind can read `__nb_signature__`
+exec --fail-on-error cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug
+exec --fail-on-error cmake --build build --target somelib --config Debug
+
+# Generate stubs
+writefile src/somelib/__init__.py "from .somelib import *"
+exec --fail-on-error python ../../vendor/nanobind/src/stubgen.py -r -q -m somelib -i build -i build/Debug -O src/somelib -M src/somelib/py.typed
+'''
+
 # Build deps
 
 [tasks.build-tool]
@@ -618,10 +683,30 @@ script_runner = "@duckscript"
 script = '''
 mkdir vendor
 cd vendor
-nanobind_present = is_path_exists nanobind
-if !nanobind_present
+nanobind_exists = is_path_exists nanobind
+if not ${nanobind_exists}
     exec git clone https://github.com/wjakob/nanobind.git --depth=1 -b "v2.4.0" --recurse-submodules -q
 end
+# Read Nanobind version:
+nanobind_hdr = readfile ./nanobind/pyproject.toml
+nanobind_split = split ${nanobind_hdr} "\n"
+len = array_length ${nanobind_split}
+
+version = set "unknown"
+for i in ${nanobind_split}
+    is_version = starts_with ${i} "version"
+    if ${is_version}
+        version = set ${i}
+        version = replace ${version} "version = \"" " "
+        version = replace ${version} "\"" ""
+        version = trim ${version}
+        goto :stop
+    end
+end
+
+:stop
+echo "Found Nanobind version ${version}"
+assert_eq ${version} "2.4.0"
 '''
 
 [tasks.bench-rust-example]

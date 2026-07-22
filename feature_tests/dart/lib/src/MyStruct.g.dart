@@ -97,6 +97,12 @@ final class MyStruct {
     return result;
   }
 
+  int takeRefRet() {
+    final temp = _FinalizedArena();
+    final result = _MyStruct_take_ref_ret(() { final ptr = temp.arena<_MyStructFfi>(); ptr.ref = _toFfi(temp.arena); return ptr; }());
+    return result;
+  }
+
   ///
   ///
   /// Throws [MyZst] on failure.
@@ -141,22 +147,32 @@ final class MyStruct {
       ]);
 }
 
-@_DiplomatFfiUse('MyStruct_new')
+// ignore: experimental_member_use
+@meta.RecordUse()
 @ffi.Native<_MyStructFfi Function()>(isLeaf: true, symbol: 'MyStruct_new')
 // ignore: non_constant_identifier_names
 external _MyStructFfi _MyStruct_new();
 
-@_DiplomatFfiUse('MyStruct_into_a')
+// ignore: experimental_member_use
+@meta.RecordUse()
 @ffi.Native<ffi.Uint8 Function(_MyStructFfi)>(isLeaf: true, symbol: 'MyStruct_into_a')
 // ignore: non_constant_identifier_names
 external int _MyStruct_into_a(_MyStructFfi self);
 
-@_DiplomatFfiUse('MyStruct_returns_zst_result')
+// ignore: experimental_member_use
+@meta.RecordUse()
+@ffi.Native<ffi.Uint8 Function(ffi.Pointer<_MyStructFfi>)>(isLeaf: true, symbol: 'MyStruct_take_ref_ret')
+// ignore: non_constant_identifier_names
+external int _MyStruct_take_ref_ret(ffi.Pointer<_MyStructFfi> self);
+
+// ignore: experimental_member_use
+@meta.RecordUse()
 @ffi.Native<_ResultVoidMyZstFfi Function()>(isLeaf: true, symbol: 'MyStruct_returns_zst_result')
 // ignore: non_constant_identifier_names
 external _ResultVoidMyZstFfi _MyStruct_returns_zst_result();
 
-@_DiplomatFfiUse('MyStruct_fails_zst_result')
+// ignore: experimental_member_use
+@meta.RecordUse()
 @ffi.Native<_ResultVoidMyZstFfi Function()>(isLeaf: true, symbol: 'MyStruct_fails_zst_result')
 // ignore: non_constant_identifier_names
 external _ResultVoidMyZstFfi _MyStruct_fails_zst_result();

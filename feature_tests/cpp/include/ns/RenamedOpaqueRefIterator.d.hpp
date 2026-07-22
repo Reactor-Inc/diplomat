@@ -22,12 +22,6 @@ class AttrOpaque1Renamed;
 namespace somelib::ns {
 namespace capi {
     struct RenamedOpaqueRefIterator;
-
-
-    typedef struct DiplomatRenamedOpaqueRefIteratorView {
-      const RenamedOpaqueRefIterator** data;
-      size_t len;
-    } DiplomatRenamedOpaqueRefIteratorView;
 } // namespace capi
 } // namespace
 
@@ -35,7 +29,7 @@ namespace somelib::ns {
 class RenamedOpaqueRefIterator {
 public:
 
-  inline const somelib::ns::AttrOpaque1Renamed* next();
+  inline const somelib::ns::AttrOpaque1Renamed* next() DIPLOMAT_LIFETIME_BOUND;
 
     inline const somelib::ns::capi::RenamedOpaqueRefIterator* AsFFI() const;
     inline somelib::ns::capi::RenamedOpaqueRefIterator* AsFFI();

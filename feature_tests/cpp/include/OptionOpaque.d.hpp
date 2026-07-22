@@ -24,12 +24,6 @@ class OptionEnum;
 namespace somelib {
 namespace capi {
     struct OptionOpaque;
-
-
-    typedef struct DiplomatOptionOpaqueView {
-      const OptionOpaque** data;
-      size_t len;
-    } DiplomatOptionOpaqueView;
 } // namespace capi
 } // namespace
 
@@ -55,9 +49,9 @@ public:
 
   inline static somelib::OptionStruct new_struct_nones();
 
-  inline const somelib::OptionOpaque* returns_none_self() const;
+  inline const somelib::OptionOpaque* returns_none_self() const DIPLOMAT_LIFETIME_BOUND;
 
-  inline const somelib::OptionOpaque* returns_some_self() const;
+  inline const somelib::OptionOpaque* returns_some_self() const DIPLOMAT_LIFETIME_BOUND;
 
   inline void assert_integer(int32_t i) const;
 

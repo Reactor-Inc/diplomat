@@ -1,7 +1,11 @@
 use serde::Serialize;
 use syn::ItemFn;
 
-use crate::ast::{Attrs, Docs, Ident, LifetimeEnv, Param, PathType, TypeName};
+use crate::ast::{
+    idents::{FromWithSpan, IntoWithSpan},
+    logging::{create_report, AstReport, ContextLocation},
+    Attrs, Docs, Ident, LifetimeEnv, Param, PathType, SpanLocation, TypeName,
+};
 
 #[derive(Clone, PartialEq, Eq, Hash, Serialize, Debug)]
 #[non_exhaustive]
@@ -19,10 +23,22 @@ pub struct Function {
 }
 
 impl Function {
-    pub(crate) fn from_syn(f: &ItemFn, parent_attrs: &Attrs) -> Function {
-        let ident: Ident = (&f.sig.ident).into();
-        if f.sig.receiver().is_some() {
-            panic!("Cannot use self parameter in free function {ident:?}")
+    pub(crate) fn from_syn(
+        f: &ItemFn,
+        parent_attrs: &Attrs,
+        module_location: &SpanLocation,
+    ) -> Function {
+        let ident: Ident = (&f.sig.ident).spanned_into(module_location);
+        if let Some(recv) = f.sig.receiver() {
+            create_report(AstReport::new(
+                "Cannot use self parameter in free function.".into(),
+                Some(f.sig.ident.span().spanned_into(module_location)),
+                "".into(),
+                vec![ContextLocation::new(
+                    recv.self_token.span.spanned_into(module_location),
+                    "Suggestion: remove self param.".into(),
+                )],
+            ));
         }
 
         let mut attrs = parent_attrs.clone();
@@ -36,7 +52,7 @@ impl Function {
 
         let extern_ident = syn::Ident::new(&concat_func_ident, f.sig.ident.span());
 
-        let path_type = PathType::from(&f.sig);
+        let path_type = PathType::spanned_from(&f.sig, module_location);
 
         let all_params = f
             .sig
@@ -44,7 +60,9 @@ impl Function {
             .iter()
             .filter_map(|a| match a {
                 syn::FnArg::Receiver(_) => None,
-                syn::FnArg::Typed(ref t) => Some(Param::from_syn(t, path_type.clone())),
+                syn::FnArg::Typed(ref t) => {
+                    Some(Param::from_syn(t, path_type.clone(), module_location))
+                }
             })
             .collect::<Vec<_>>();
 
@@ -52,15 +70,21 @@ impl Function {
             syn::ReturnType::Type(_, return_typ) => Some(TypeName::from_syn(
                 return_typ.as_ref(),
                 Some(path_type.clone()),
+                module_location,
             )),
             syn::ReturnType::Default => None,
         };
 
-        let lifetimes = LifetimeEnv::from_function_item(f, &all_params[..], output_type.as_ref());
+        let lifetimes = LifetimeEnv::from_function_item(
+            f,
+            &all_params[..],
+            output_type.as_ref(),
+            module_location,
+        );
 
         Self {
             name: ident,
-            abi_name: (&extern_ident).into(),
+            abi_name: (&extern_ident).spanned_into(module_location),
             params: all_params,
             output_type,
             lifetimes,
@@ -86,7 +110,8 @@ mod tests {
 
                 }
             },
-            &Attrs::default()
+            &Attrs::default(),
+            &crate::ast::SpanLocation::None
         ));
     }
 
@@ -98,7 +123,8 @@ mod tests {
 
                 }
             },
-            &Attrs::default()
+            &Attrs::default(),
+            &crate::ast::SpanLocation::None
         ));
     }
 
@@ -110,7 +136,8 @@ mod tests {
 
                 }
             },
-            &Attrs::default()
+            &Attrs::default(),
+            &crate::ast::SpanLocation::None
         ));
     }
 }

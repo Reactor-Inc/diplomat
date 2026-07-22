@@ -23,7 +23,6 @@ namespace somelib {
 namespace capi {
     struct MyString;
 
-
     typedef struct DiplomatMyStringView {
       const MyString** data;
       size_t len;
@@ -55,7 +54,7 @@ public:
   template<typename W>
   inline static somelib::diplomat::result<std::monostate, somelib::diplomat::Utf8Error> string_transform_write(std::string_view foo, W& writeable_output);
 
-  inline std::string_view borrow() const;
+  inline std::string_view borrow() const DIPLOMAT_LIFETIME_BOUND;
 
   inline static std::string slice_of_opaques(somelib::diplomat::span<const somelib::MyString*> sl);
   template<typename W>

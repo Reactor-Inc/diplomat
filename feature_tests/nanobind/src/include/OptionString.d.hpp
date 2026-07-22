@@ -20,12 +20,6 @@ class OptionString;
 namespace somelib {
 namespace capi {
     struct OptionString;
-
-
-    typedef struct DiplomatOptionStringView {
-      const OptionString** data;
-      size_t len;
-    } DiplomatOptionStringView;
 } // namespace capi
 } // namespace
 
@@ -39,7 +33,7 @@ public:
   template<typename W>
   inline somelib::diplomat::result<std::monostate, std::monostate> write_write(W& writeable_output) const;
 
-  inline std::optional<std::string_view> borrow() const;
+  inline std::optional<std::string_view> borrow() const DIPLOMAT_LIFETIME_BOUND;
 
     inline const somelib::capi::OptionString* AsFFI() const;
     inline somelib::capi::OptionString* AsFFI();

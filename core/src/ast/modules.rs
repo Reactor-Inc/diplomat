@@ -4,13 +4,16 @@ use std::fmt::Write as _;
 
 use quote::ToTokens;
 use serde::Serialize;
+use syn::spanned::Spanned;
 use syn::{ImplItem, Item, ItemMod, UseTree, Visibility};
 
 use super::{
     AttrInheritContext, Attrs, CustomType, Enum, Ident, Macros, Method, ModSymbol, Mutability,
     OpaqueType, Path, PathType, RustLink, Struct, Trait,
 };
-use crate::ast::Function;
+use crate::ast::idents::{FromWithSpan, IntoWithSpan};
+use crate::ast::logging::{create_report, create_simple_report, AstReport};
+use crate::ast::{Function, SpanLocation};
 use crate::environment::*;
 
 /// Custom Diplomat attribute that can be placed on a struct definition.
@@ -156,31 +159,46 @@ struct ModuleBuilder<'a> {
     impl_parent_attrs: Attrs,
     mod_macros: Macros,
     include_info: Option<ModuleIncludeInfo<'a>>,
+    /// Where the module is stored as a file.
+    module_location: &'a SpanLocation,
 }
 
 impl<'a> ModuleBuilder<'a> {
     fn add(&mut self, a: &Item) {
         match a {
             Item::Use(u) if self.analyze_types => {
-                extract_imports(&Path::empty(), &u.tree, &mut self.imports);
+                extract_imports(
+                    &Path::empty(),
+                    &u.tree,
+                    &mut self.imports,
+                    self.module_location,
+                );
             }
             Item::Struct(strct) if self.analyze_types => {
                 if self.skip_private_items && !matches!(strct.vis, syn::Visibility::Public(..)) {
-                    self.private_types_by_name.insert((&strct.ident).into());
+                    self.private_types_by_name
+                        .insert((&strct.ident).spanned_into(self.module_location));
                     return;
                 }
                 let custom_type = match DiplomatStructAttribute::parse(&strct.attrs[..]) {
-                    Ok(None) => {
-                        CustomType::Struct(Struct::new(strct, false, &self.type_parent_attrs))
-                    }
-                    Ok(Some(DiplomatStructAttribute::Out)) => {
-                        CustomType::Struct(Struct::new(strct, true, &self.type_parent_attrs))
-                    }
+                    Ok(None) => CustomType::Struct(Struct::new(
+                        strct,
+                        false,
+                        &self.type_parent_attrs,
+                        self.module_location,
+                    )),
+                    Ok(Some(DiplomatStructAttribute::Out)) => CustomType::Struct(Struct::new(
+                        strct,
+                        true,
+                        &self.type_parent_attrs,
+                        self.module_location,
+                    )),
                     Ok(Some(DiplomatStructAttribute::TypeAttr(DiplomatTypeAttribute::Opaque))) => {
                         CustomType::Opaque(OpaqueType::new_struct(
                             strct,
                             Mutability::Immutable,
                             &self.type_parent_attrs,
+                            self.module_location,
                         ))
                     }
                     Ok(Some(DiplomatStructAttribute::TypeAttr(
@@ -189,18 +207,21 @@ impl<'a> ModuleBuilder<'a> {
                         strct,
                         Mutability::Mutable,
                         &self.type_parent_attrs,
+                        self.module_location,
                     )),
                     Err(errors) => {
-                        panic!("Multiple conflicting Diplomat struct attributes, there can be at most one: {errors:?}");
+                        create_simple_report((&strct.ident).spanned_into(self.module_location), "Multiple conflicting Diplomat struct attributes, there can be at most one.".into(), format!("{errors:?}"));
                     }
                 };
 
-                self.custom_types_by_name
-                    .insert(Ident::from(&strct.ident), custom_type);
+                self.custom_types_by_name.insert(
+                    (&strct.ident).spanned_into(self.module_location),
+                    custom_type,
+                );
             }
 
             Item::Enum(enm) if self.analyze_types => {
-                let ident = (&enm.ident).into();
+                let ident = (&enm.ident).spanned_into(self.module_location);
 
                 if self.skip_private_items && !matches!(enm.vis, syn::Visibility::Public(..)) {
                     self.private_types_by_name.insert(ident);
@@ -208,15 +229,29 @@ impl<'a> ModuleBuilder<'a> {
                 }
 
                 let custom_enum = match DiplomatTypeAttribute::parse(&enm.attrs[..]) {
-                    Ok(None) => CustomType::Enum(Enum::new(enm, &self.type_parent_attrs)),
-                    Ok(Some(DiplomatTypeAttribute::Opaque)) => CustomType::Opaque(
-                        OpaqueType::new_enum(enm, Mutability::Immutable, &self.type_parent_attrs),
-                    ),
-                    Ok(Some(DiplomatTypeAttribute::OpaqueMut)) => CustomType::Opaque(
-                        OpaqueType::new_enum(enm, Mutability::Mutable, &self.type_parent_attrs),
-                    ),
+                    Ok(None) => CustomType::Enum(Enum::new(
+                        enm,
+                        &self.type_parent_attrs,
+                        self.module_location,
+                    )),
+                    Ok(Some(DiplomatTypeAttribute::Opaque)) => {
+                        CustomType::Opaque(OpaqueType::new_enum(
+                            enm,
+                            Mutability::Immutable,
+                            &self.type_parent_attrs,
+                            self.module_location,
+                        ))
+                    }
+                    Ok(Some(DiplomatTypeAttribute::OpaqueMut)) => {
+                        CustomType::Opaque(OpaqueType::new_enum(
+                            enm,
+                            Mutability::Mutable,
+                            &self.type_parent_attrs,
+                            self.module_location,
+                        ))
+                    }
                     Err(errors) => {
-                        panic!("Multiple conflicting Diplomat enum attributes, there can be at most one: {errors:?}");
+                        create_simple_report((&enm.ident).spanned_into(self.module_location), "Multiple conflicting Diplomat enum attributes, there can be at most one.".into(), format!("{errors:?}"));
                     }
                 };
                 self.custom_types_by_name.insert(ident, custom_enum);
@@ -224,8 +259,15 @@ impl<'a> ModuleBuilder<'a> {
 
             Item::Impl(imp) if self.analyze_types && imp.trait_.is_none() => {
                 let self_path = match imp.self_ty.as_ref() {
-                    syn::Type::Path(s) => PathType::from(s),
-                    _ => panic!("Self type not found"),
+                    syn::Type::Path(s) => PathType::spanned_from(s, self.module_location),
+                    _ => {
+                        create_report(AstReport::new(
+                            "Self type not found".into(),
+                            Some(imp.self_ty.span().spanned_into(self.module_location)),
+                            "Expected Path type".into(),
+                            vec![],
+                        ));
+                    }
                 };
                 let mut impl_attrs = self.impl_parent_attrs.clone();
                 impl_attrs.add_attrs(&imp.attrs);
@@ -241,7 +283,9 @@ impl<'a> ModuleBuilder<'a> {
                             impl_item_vec.push(ImplItem::Fn(f.clone()));
                         }
                         ImplItem::Macro(mac) => {
-                            let mut items = self.mod_macros.evaluate_impl_item_macro(mac);
+                            let mut items = self
+                                .mod_macros
+                                .evaluate_impl_item_macro(mac, self.module_location);
                             impl_item_vec.append(&mut items);
                         }
                         _ => {}
@@ -261,11 +305,13 @@ impl<'a> ModuleBuilder<'a> {
                             .attrs
                             .iter()
                             .any(|a| a.path().segments.iter().next().unwrap().ident == "diplomat");
-                        assert!(
-                            is_public || !has_diplomat_attrs,
-                            "Non-public method with diplomat attrs found: {self_ident}::{}",
-                            m.sig.ident
-                        );
+                        if !is_public && has_diplomat_attrs {
+                            create_simple_report(
+                                (&m.sig.ident).spanned_into(self.module_location),
+                                "Found non-public method with diplomat attrs".into(),
+                                "Remove #[diplomat::*] attributes.".into(),
+                            );
+                        }
                         is_public
                     })
                     .map(|m| {
@@ -274,6 +320,7 @@ impl<'a> ModuleBuilder<'a> {
                             self_path.clone(),
                             Some(&imp.generics),
                             &method_parent_attrs,
+                            self.module_location,
                         )
                     })
                     .collect();
@@ -282,26 +329,38 @@ impl<'a> ModuleBuilder<'a> {
                     return;
                 }
 
-                match self.custom_types_by_name.get_mut(self_ident)
-                                                .unwrap_or_else(|| panic!("Diplomat currently requires impls to be in the same module as their self type ({self_ident})")) {
-                        CustomType::Struct(strct) => {
-                            strct.methods.append(&mut new_methods);
-                        }
-                        CustomType::Opaque(strct) => {
-                            strct.methods.append(&mut new_methods);
-                        }
-                        CustomType::Enum(enm) => {
-                            enm.methods.append(&mut new_methods);
-                        }
+                match self
+                    .custom_types_by_name
+                    .get_mut(self_ident)
+                    .unwrap_or_else(|| {
+                        create_simple_report(
+                            self_ident.clone(),
+                            "Diplomat requires impls to be in the same module as their type".into(),
+                            format!("{self_ident} should be defined in the same module."),
+                        );
+                    }) {
+                    CustomType::Struct(strct) => {
+                        strct.methods.append(&mut new_methods);
                     }
+                    CustomType::Opaque(strct) => {
+                        strct.methods.append(&mut new_methods);
+                    }
+                    CustomType::Enum(enm) => {
+                        enm.methods.append(&mut new_methods);
+                    }
+                }
             }
             Item::Mod(item_mod) => {
-                self.sub_modules
-                    .push(Module::from_syn(item_mod, false, self.include_info.clone()));
+                self.sub_modules.push(Module::from_syn(
+                    item_mod,
+                    false,
+                    self.include_info.clone(),
+                    self.module_location,
+                ));
             }
             Item::Trait(trt) if self.analyze_types => {
-                let ident = (&trt.ident).into();
-                let trt = Trait::new(trt, &self.type_parent_attrs);
+                let ident = (&trt.ident).spanned_into(self.module_location);
+                let trt = Trait::new(trt, &self.type_parent_attrs, self.module_location);
                 self.custom_traits_by_name.insert(ident, trt);
             }
             Item::Macro(mac) if self.analyze_types => {
@@ -318,7 +377,9 @@ impl<'a> ModuleBuilder<'a> {
                         );
                     }
                 } else {
-                    let items = self.mod_macros.evaluate_item_macro(mac);
+                    let items = self
+                        .mod_macros
+                        .evaluate_item_macro(mac, self.module_location);
                     for i in items {
                         self.add(&i);
                     }
@@ -330,16 +391,18 @@ impl<'a> ModuleBuilder<'a> {
                     .attrs
                     .iter()
                     .any(|a| a.path().segments.iter().next().unwrap().ident == "diplomat");
-                assert!(
-                    is_public || !has_diplomat_attrs,
-                    "Non-public function with diplomat attrs found: {}",
-                    f.sig.ident
-                );
+                if !is_public && has_diplomat_attrs {
+                    create_simple_report(
+                        (&f.sig.ident).spanned_into(self.module_location),
+                        "Found non-public method with diplomat attrs".into(),
+                        "Remove #[diplomat::*] attributes.".into(),
+                    );
+                }
                 if is_public {
                     let parent_attrs = self
                         .impl_parent_attrs
                         .attrs_for_inheritance(AttrInheritContext::MethodFromImpl);
-                    let out = Function::from_syn(f, &parent_attrs);
+                    let out = Function::from_syn(f, &parent_attrs, self.module_location);
                     self.functions_by_name.insert(out.name.clone(), out);
                 }
             }
@@ -374,7 +437,12 @@ impl Module {
                 .insert(k.clone(), ModSymbol::CustomType(v.clone()))
                 .is_some()
             {
-                panic!("Two types were declared with the same name, this needs to be implemented (key: {k})");
+                create_simple_report(
+                    k.clone(),
+                    "Two types were declared with the same name (this is currently unsupported)"
+                        .into(),
+                    "Duplicate type".into(),
+                );
             }
         });
 
@@ -383,13 +451,18 @@ impl Module {
                 .insert(k.clone(), ModSymbol::Trait(v.clone()))
                 .is_some()
             {
-                panic!("Two traits were declared with the same name, this needs to be implemented (key: {k})");
+                create_simple_report(
+                    k.clone(),
+                    "Two traits were declared with the same name (this is currently unsupported)"
+                        .into(),
+                    "Duplicate trait".into(),
+                );
             }
         });
 
         self.declared_functions.iter().for_each(|(k, f)| {
             if mod_symbols.insert(k.clone(), ModSymbol::Function(f.clone())).is_some() {
-                panic!("Two functions were declared with the same name, this needs to be implemented (key: {k})")
+                create_simple_report(k.clone(), "Two functions were declared with the same name (this is currently unsupported)".into(), "Duplicate function".into());
             }
         });
 
@@ -410,11 +483,12 @@ impl Module {
         input: &ItemMod,
         force_analyze: bool,
         include_info: Option<ModuleIncludeInfo<'a>>,
+        module_location: &SpanLocation,
     ) -> Module {
         let mod_attrs: Attrs = (&*input.attrs).into();
 
         let mod_macros = if let Some(inc) = &include_info {
-            let defs = parse_macro_file(input, force_analyze, inc.clone())
+            let defs = parse_macro_file(input, force_analyze, inc.clone(), module_location)
                 .expect("Could not parse macro definitions");
             Macros { defs }
         } else {
@@ -441,6 +515,7 @@ impl Module {
             type_parent_attrs: mod_attrs.attrs_for_inheritance(AttrInheritContext::Type),
             mod_macros,
             include_info,
+            module_location,
         };
 
         input
@@ -454,7 +529,7 @@ impl Module {
             });
 
         Module {
-            name: (&input.ident).into(),
+            name: (&input.ident).spanned_into(module_location),
             imports: mst.imports,
             declared_types: mst.custom_types_by_name,
             declared_traits: mst.custom_traits_by_name,
@@ -465,25 +540,33 @@ impl Module {
     }
 }
 
-fn extract_imports(base_path: &Path, use_tree: &UseTree, out: &mut Vec<(Path, Ident)>) {
+fn extract_imports(
+    base_path: &Path,
+    use_tree: &UseTree,
+    out: &mut Vec<(Path, Ident)>,
+    module_location: &SpanLocation,
+) {
     match use_tree {
         UseTree::Name(name) => out.push((
-            base_path.sub_path((&name.ident).into()),
-            (&name.ident).into(),
+            base_path.sub_path((&name.ident).spanned_into(module_location)),
+            (&name.ident).spanned_into(module_location),
         )),
-        UseTree::Path(path) => {
-            extract_imports(&base_path.sub_path((&path.ident).into()), &path.tree, out)
-        }
+        UseTree::Path(path) => extract_imports(
+            &base_path.sub_path((&path.ident).spanned_into(module_location)),
+            &path.tree,
+            out,
+            module_location,
+        ),
         UseTree::Glob(_) => todo!("Glob imports are not yet supported"),
         UseTree::Group(group) => {
             group
                 .items
                 .iter()
-                .for_each(|i| extract_imports(base_path, i, out));
+                .for_each(|i| extract_imports(base_path, i, out, module_location));
         }
         UseTree::Rename(rename) => out.push((
-            base_path.sub_path((&rename.ident).into()),
-            (&rename.rename).into(),
+            base_path.sub_path((&rename.ident).spanned_into(module_location)),
+            (&rename.rename).spanned_into(module_location),
         )),
     }
 }
@@ -517,13 +600,32 @@ impl File {
             .collect()
     }
 
-    pub fn from_syn(file: &syn::File, include_info: Option<ModuleIncludeInfo>) -> File {
+    pub fn from_syn(
+        file: &syn::File,
+        include_info: Option<ModuleIncludeInfo>,
+        entry_location: &SpanLocation,
+    ) -> File {
         let mut out = BTreeMap::new();
         file.items.iter().for_each(|i| {
             if let Item::Mod(item_mod) = i {
+                let module_location = match entry_location {
+                    SpanLocation::FilePath(p) => {
+                        // Entry location points to a folder, so we can just join to add a subfolder:
+                        let pth = std::path::Path::new(p);
+                        let new_pth = pth.join(format!("{}.rs", item_mod.ident));
+                        if !new_pth.exists() {
+                            // We could just be in an item submodule, so we stay in the entry module path:
+                            &SpanLocation::FilePath(p.clone())
+                        } else {
+                            &SpanLocation::FilePath(new_pth.to_string_lossy().into())
+                        }
+                    }
+                    SpanLocation::None => &SpanLocation::None,
+                    SpanLocation::LocalSource(..) => unreachable!("Span Location for ast::File should never be LocalSource, we expect a filepath.")
+                };
                 out.insert(
                     item_mod.ident.to_string(),
-                    Module::from_syn(item_mod, false, include_info.clone()),
+                    Module::from_syn(item_mod, false, include_info.clone(), module_location),
                 );
             }
         });
@@ -536,6 +638,7 @@ pub fn parse_macro_file(
     m: &ItemMod,
     force_analyze: bool,
     include_info: ModuleIncludeInfo,
+    module_location: &SpanLocation,
 ) -> Result<BTreeMap<syn::Ident, super::MacroDef>, std::io::Error> {
     let contains_bridge = m
         .attrs
@@ -579,6 +682,7 @@ pub fn parse_macro_file(
                 include_info: None,
                 private_types_by_name: BTreeSet::new(),
                 skip_private_items: false,
+                module_location,
             };
             for i in syn_file.items {
                 mst.add(&i);
@@ -608,7 +712,7 @@ pub fn parse_macro_file(
 impl From<&syn::File> for File {
     /// Get all custom types across all modules defined in a given file.
     fn from(file: &syn::File) -> File {
-        File::from_syn(file, None)
+        File::from_syn(file, None, &SpanLocation::None)
     }
 }
 
@@ -618,7 +722,7 @@ mod tests {
 
     use syn;
 
-    use crate::ast::{File, Module};
+    use crate::ast::{File, Module, SpanLocation};
 
     #[test]
     fn simple_mod() {
@@ -666,7 +770,8 @@ mod tests {
                     }
                 },
                 true,
-                None
+                None,
+                &SpanLocation::None,
             ));
         });
     }
@@ -700,7 +805,8 @@ mod tests {
                     }
                 },
                 true,
-                None
+                None,
+                &SpanLocation::None,
             ));
         });
     }

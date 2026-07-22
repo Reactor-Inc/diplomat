@@ -1,18 +1,110 @@
 ---
 source: core/src/ast/types.rs
-expression: "TypeName::from_syn(&syn::parse_quote! {\n                very :: long :: path :: to :: my :: Type < 'x, 'y, 'z >\n            }, None)"
+expression: "TypeName::from_syn(&syn::parse_quote!\n{ very::long::path::to::my::Type<'x, 'y, 'z> }, None, &SpanLocation::None)"
 ---
 Named:
   path:
     elements:
-      - very
-      - long
-      - path
-      - to
-      - my
-      - Type
+      - - very
+        - start:
+            line: 1
+            col: 0
+          end:
+            line: 1
+            col: 0
+          range:
+            start: 0
+            end: 0
+          span_location: None
+      - - long
+        - start:
+            line: 1
+            col: 0
+          end:
+            line: 1
+            col: 0
+          range:
+            start: 0
+            end: 0
+          span_location: None
+      - - path
+        - start:
+            line: 1
+            col: 0
+          end:
+            line: 1
+            col: 0
+          range:
+            start: 0
+            end: 0
+          span_location: None
+      - - to
+        - start:
+            line: 1
+            col: 0
+          end:
+            line: 1
+            col: 0
+          range:
+            start: 0
+            end: 0
+          span_location: None
+      - - my
+        - start:
+            line: 1
+            col: 0
+          end:
+            line: 1
+            col: 0
+          range:
+            start: 0
+            end: 0
+          span_location: None
+      - - Type
+        - start:
+            line: 1
+            col: 0
+          end:
+            line: 1
+            col: 0
+          range:
+            start: 0
+            end: 0
+          span_location: None
   lifetimes:
-    - Named: x
-    - Named: y
-    - Named: z
-
+    - Named:
+        - x
+        - start:
+            line: 1
+            col: 0
+          end:
+            line: 1
+            col: 0
+          range:
+            start: 0
+            end: 0
+          span_location: None
+    - Named:
+        - y
+        - start:
+            line: 1
+            col: 0
+          end:
+            line: 1
+            col: 0
+          range:
+            start: 0
+            end: 0
+          span_location: None
+    - Named:
+        - z
+        - start:
+            line: 1
+            col: 0
+          end:
+            line: 1
+            col: 0
+          range:
+            start: 0
+            end: 0
+          span_location: None

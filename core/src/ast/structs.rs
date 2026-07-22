@@ -1,4 +1,8 @@
 use serde::Serialize;
+use syn::spanned::Spanned;
+
+use crate::ast::idents::{IntoWithSpan, SpanLocation};
+use crate::ast::logging::{create_report, AstReport, ContextLocation};
 
 use super::docs::Docs;
 use super::{Attrs, Ident, LifetimeEnv, Method, PathType, TypeName};
@@ -18,32 +22,46 @@ pub struct Struct {
 
 impl Struct {
     /// Extract a [`Struct`] metadata value from an AST node.
-    pub fn new(strct: &syn::ItemStruct, output_only: bool, parent_attrs: &Attrs) -> Self {
-        let self_path_type = PathType::extract_self_type(strct);
+    pub fn new(
+        strct: &syn::ItemStruct,
+        output_only: bool,
+        parent_attrs: &Attrs,
+        module_location: &SpanLocation,
+    ) -> Self {
+        let self_path_type = PathType::extract_self_type(strct, module_location);
         let fields: Vec<_> = strct
             .fields
             .iter()
             .map(|field| {
-                use quote::ToTokens;
                 // Non-opaque tuple structs will never be allowed
-                let name = field.ident.as_ref().map(Into::into).unwrap_or_else(|| {
-                    panic!(
-                        "non-opaque tuples structs are disallowed ({:?})",
-                        field.ty.to_token_stream().to_string()
-                    )
-                });
-                let type_name = TypeName::from_syn(&field.ty, Some(self_path_type.clone()));
+                let name = field
+                    .ident
+                    .as_ref()
+                    .map(|i| i.spanned_into(module_location))
+                    .unwrap_or_else(|| {
+                        create_report(AstReport::new(
+                            "Non-opaque tuple structs are disallowed".into(),
+                            Some(field.ty.span().spanned_into(module_location)),
+                            "If struct is not opaque, fields must have idents".into(),
+                            vec![ContextLocation::new(
+                                strct.ident.span().spanned_into(module_location),
+                                "Suggestion: mark with #[diplomat::opaque]".into(),
+                            )],
+                        ));
+                    });
+                let type_name =
+                    TypeName::from_syn(&field.ty, Some(self_path_type.clone()), module_location);
                 let docs = Docs::from_attrs(&field.attrs);
 
                 (name, type_name, docs, Attrs::from_attrs(&field.attrs))
             })
             .collect();
 
-        let lifetimes = LifetimeEnv::from_struct_item(strct, &fields[..]);
+        let lifetimes = LifetimeEnv::from_struct_item(strct, &fields[..], module_location);
         let mut attrs = parent_attrs.clone();
         attrs.add_attrs(&strct.attrs);
         Struct {
-            name: (&strct.ident).into(),
+            name: (&strct.ident).spanned_into(module_location),
             docs: Docs::from_attrs(&strct.attrs),
             lifetimes,
             fields,
@@ -59,6 +77,8 @@ mod tests {
     use insta::{self, Settings};
 
     use syn;
+
+    use crate::ast::idents::SpanLocation;
 
     use super::Struct;
 
@@ -78,7 +98,8 @@ mod tests {
                     }
                 },
                 true,
-                &Default::default()
+                &Default::default(),
+                &SpanLocation::None
             ));
         });
     }

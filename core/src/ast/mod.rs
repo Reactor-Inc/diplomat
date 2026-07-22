@@ -40,10 +40,12 @@ mod paths;
 pub use paths::Path;
 
 mod idents;
-pub use idents::Ident;
+pub use idents::{Ident, SpanLocation};
 
 mod docs;
 pub use docs::{DocType, Docs, RustLink, RustLinkDisplay};
 
 mod macros;
 pub use macros::{MacroDef, MacroUse, Macros};
+
+mod logging;

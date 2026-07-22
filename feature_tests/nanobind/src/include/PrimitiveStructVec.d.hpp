@@ -26,12 +26,6 @@ struct RenamedStructWithAttrs;
 namespace somelib {
 namespace capi {
     struct PrimitiveStructVec;
-
-
-    typedef struct DiplomatPrimitiveStructVecView {
-      const PrimitiveStructVec** data;
-      size_t len;
-    } DiplomatPrimitiveStructVecView;
 } // namespace capi
 } // namespace
 
@@ -45,7 +39,7 @@ public:
 
   inline size_t __len__() const;
 
-  inline somelib::diplomat::span<const somelib::PrimitiveStruct> as_slice() const;
+  inline somelib::diplomat::span<const somelib::PrimitiveStruct> as_slice() const DIPLOMAT_LIFETIME_BOUND;
 
   inline std::optional<somelib::PrimitiveStruct> operator[](size_t idx) const;
 

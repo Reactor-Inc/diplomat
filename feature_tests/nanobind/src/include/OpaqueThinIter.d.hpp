@@ -20,12 +20,6 @@ class OpaqueThin;
 namespace somelib {
 namespace capi {
     struct OpaqueThinIter;
-
-
-    typedef struct DiplomatOpaqueThinIterView {
-      const OpaqueThinIter** data;
-      size_t len;
-    } DiplomatOpaqueThinIterView;
 } // namespace capi
 } // namespace
 
@@ -33,7 +27,7 @@ namespace somelib {
 class OpaqueThinIter {
 public:
 
-  inline const somelib::OpaqueThin* next();
+  inline const somelib::OpaqueThin* next() DIPLOMAT_LIFETIME_BOUND;
 
     inline const somelib::capi::OpaqueThinIter* AsFFI() const;
     inline somelib::capi::OpaqueThinIter* AsFFI();
