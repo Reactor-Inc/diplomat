@@ -57,6 +57,7 @@ public partial class MyOpaqueEnum: IDisposable
         _inner = inner;
         _edges = edges;
     }
+
     /// <returns>
     /// A <c>MyOpaqueEnum</c> allocated on Rust side.
     /// </returns>
@@ -68,6 +69,7 @@ public partial class MyOpaqueEnum: IDisposable
             return new MyOpaqueEnum(result);
         }
     }
+
     public override string ToString()
     {
         unsafe
@@ -76,7 +78,7 @@ public partial class MyOpaqueEnum: IDisposable
             {
                 throw new ObjectDisposedException("MyOpaqueEnum");
             }
-            DiplomatWriteable writeable = new DiplomatWriteable();
+            DiplomatWrite writeable = new DiplomatWrite();
             try
             {
                 Raw.MyOpaqueEnum.ToString(AsFFI(), &writeable);

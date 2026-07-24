@@ -57,6 +57,7 @@ public partial class OpaqueThin: IDisposable
         _inner = inner;
         _edges = edges;
     }
+
     public int A()
     {
         unsafe
@@ -70,6 +71,7 @@ public partial class OpaqueThin: IDisposable
             return result;
         }
     }
+
     public float B()
     {
         unsafe
@@ -83,6 +85,7 @@ public partial class OpaqueThin: IDisposable
             return result;
         }
     }
+
     public string C()
     {
         unsafe
@@ -91,7 +94,7 @@ public partial class OpaqueThin: IDisposable
             {
                 throw new ObjectDisposedException("OpaqueThin");
             }
-            DiplomatWriteable writeable = new DiplomatWriteable();
+            DiplomatWrite writeable = new DiplomatWrite();
             try
             {
                 Raw.OpaqueThin.C(AsFFI(), &writeable);

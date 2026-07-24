@@ -57,11 +57,12 @@ public partial class RenamedMixinTest: IDisposable
         _inner = inner;
         _edges = edges;
     }
+
     public static string Hello()
     {
         unsafe
         {
-            DiplomatWriteable writeable = new DiplomatWriteable();
+            DiplomatWrite writeable = new DiplomatWrite();
             try
             {
                 Raw.RenamedMixinTest.Hello(&writeable);

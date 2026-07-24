@@ -57,6 +57,7 @@ public partial class Float64Vec: IDisposable
         _inner = inner;
         _edges = edges;
     }
+
     /// <returns>
     /// A <c>Float64Vec</c> allocated on Rust side.
     /// </returns>
@@ -72,6 +73,7 @@ public partial class Float64Vec: IDisposable
             }
         }
     }
+
     public override string ToString()
     {
         unsafe
@@ -80,7 +82,7 @@ public partial class Float64Vec: IDisposable
             {
                 throw new ObjectDisposedException("Float64Vec");
             }
-            DiplomatWriteable writeable = new DiplomatWriteable();
+            DiplomatWrite writeable = new DiplomatWrite();
             try
             {
                 Raw.Float64Vec.ToString(AsFFI(), &writeable);
@@ -93,6 +95,7 @@ public partial class Float64Vec: IDisposable
             }
         }
     }
+
     public double? Get(nuint i)
     {
         unsafe

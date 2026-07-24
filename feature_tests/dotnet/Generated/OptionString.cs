@@ -57,6 +57,7 @@ public partial class OptionString: IDisposable
         _inner = inner;
         _edges = edges;
     }
+
     /// <returns>
     /// A <c>OptionString</c> allocated on Rust side.
     /// </returns>
@@ -73,6 +74,7 @@ public partial class OptionString: IDisposable
             }
         }
     }
+
     /// <exception cref="InvalidOperationException"></exception>
     public string Write()
     {
@@ -82,7 +84,7 @@ public partial class OptionString: IDisposable
             {
                 throw new ObjectDisposedException("OptionString");
             }
-            DiplomatWriteable writeable = new DiplomatWriteable();
+            DiplomatWrite writeable = new DiplomatWrite();
             try
             {
                 var result = Raw.OptionString.Write(AsFFI(), &writeable);
