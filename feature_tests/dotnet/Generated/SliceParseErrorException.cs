@@ -2,16 +2,19 @@ using System;
 
 namespace Somelib;
 
+/// <summary>
+/// If <c>SliceParseError</c> is an opaque error that borrows from an opaque
+/// parameter or the receiver, that source handle is held by <c>Inner</c>'s
+/// managed lifetime edge rather than by this exception class.
+/// </summary>
 public class SliceParseErrorException : Exception
 {
     public SliceParseError Inner { get; }
-    private readonly object[] _edges;
 
-    public SliceParseErrorException(SliceParseError inner, params object[] edges) : base(
+    public SliceParseErrorException(SliceParseError inner) : base(
         $"SliceParseError: {inner}"
     )
     {
         Inner = inner;
-        _edges = edges;
     }
 }

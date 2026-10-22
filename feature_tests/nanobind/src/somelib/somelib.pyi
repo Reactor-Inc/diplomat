@@ -234,40 +234,25 @@ class CallbackWrapper:
     def cant_be_empty(self, arg: bool, /) -> None: ...
 
     @staticmethod
-    def test_cb_with_struct(f: Callable[[CallbackTestingStruct], int]) -> int: ...
+    def test_cb_with_struct_fallible(f: Callable[[CallbackTestingStruct], int]) -> int: ...
 
     @staticmethod
-    def test_diplomat_option_output(t: Callable[[], int | None]) -> None: ...
+    def test_ffi_error(t: Callable[[], None]) -> None: ...
 
     @staticmethod
-    def test_diplomat_result(t: Callable[[], int]) -> None: ...
+    def test_ffi_error_as_ok(t: Callable[[], None]) -> FFIError: ...
 
     @staticmethod
-    def test_inner_conversion(t: Callable[[], MyStructContainingAnOption]) -> None: ...
+    def test_multi_arg_callback_fallible(f: Callable[[int], int], x: int) -> int: ...
 
     @staticmethod
-    def test_multi_arg_callback(f: Callable[[int], int], x: int) -> int: ...
+    def test_multiple_cb_args_fallible(f: Callable[[], int], g: Callable[[int], int]) -> int: ...
 
     @staticmethod
-    def test_multiple_cb_args(f: Callable[[], int], g: Callable[[int], int]) -> int: ...
+    def test_no_args_fallible(h: Callable[[], None]) -> int: ...
 
     @staticmethod
-    def test_no_args(h: Callable[[], None]) -> int: ...
-
-    @staticmethod
-    def test_opaque_cb_arg(cb: Callable[[MyString], None], a: MyString) -> None: ...
-
-    @staticmethod
-    def test_opaque_result_error(t: Callable[[], None]) -> str: ...
-
-    @staticmethod
-    def test_option_opaque(t: Callable[[], Opaque]) -> str: ...
-
-    @staticmethod
-    def test_option_output(t: Callable[[], monostate | None]) -> None: ...
-
-    @staticmethod
-    def test_owned_opaque(t: Callable[[Opaque], None]) -> None: ...
+    def test_opaque_cb_arg_fallible(cb: Callable[[MyString], None], a: MyString) -> None: ...
 
     @staticmethod
     def test_result_opaque(t: Callable[[], Opaque]) -> str: ...
@@ -276,19 +261,10 @@ class CallbackWrapper:
     def test_result_option_struct_conversion(t: Callable[[], MyStruct | None]) -> None: ...
 
     @staticmethod
-    def test_result_output(t: Callable[[], None]) -> None: ...
-
-    @staticmethod
-    def test_result_usize_output(t: Callable[[], int]) -> None: ...
-
-    @staticmethod
-    def test_slice_cb_arg(arg: Sequence[int], f: Callable[[Sequence[int]], None]) -> None: ...
-
-    @staticmethod
     def test_slice_conversion(t: Callable[[], Sequence[float]]) -> None: ...
 
     @staticmethod
-    def test_str_cb_arg(f: Callable[[str], int]) -> int: ...
+    def test_str_cb_arg_fallible(f: Callable[[str], int]) -> int: ...
 
     @staticmethod
     def test_str_conversion(t: Callable[[], str]) -> None: ...
@@ -332,6 +308,77 @@ class ContiguousEnum:
     def __eq__(self, arg: ContiguousEnum.ContiguousEnum, /) -> bool: ...
 
     def __repr__(self) -> str: ...
+
+class ContiguousEnumSlice:
+    @overload
+    def __init__(self) -> None:
+        """Default constructor"""
+
+    @overload
+    def __init__(self, arg: ContiguousEnumSlice) -> None:
+        """Copy constructor"""
+
+    @overload
+    def __init__(self, arg: Iterable[ContiguousEnum], /) -> None:
+        """Construct from an iterable object"""
+
+    def __len__(self) -> int: ...
+
+    def __bool__(self) -> bool:
+        """Check whether the vector is nonempty"""
+
+    def __repr__(self) -> str: ...
+
+    def __iter__(self) -> Iterator[ContiguousEnum]: ...
+
+    @overload
+    def __getitem__(self, arg: int, /) -> ContiguousEnum: ...
+
+    @overload
+    def __getitem__(self, arg: slice, /) -> ContiguousEnumSlice: ...
+
+    def clear(self) -> None:
+        """Remove all items from list."""
+
+    def append(self, arg: ContiguousEnum, /) -> None:
+        """Append `arg` to the end of the list."""
+
+    def insert(self, arg0: int, arg1: ContiguousEnum, /) -> None:
+        """Insert object `arg1` before index `arg0`."""
+
+    def pop(self, index: int = -1) -> ContiguousEnum:
+        """Remove and return item at `index` (default last)."""
+
+    def extend(self, arg: ContiguousEnumSlice, /) -> None:
+        """Extend `self` by appending elements from `arg`."""
+
+    @overload
+    def __setitem__(self, arg0: int, arg1: ContiguousEnum, /) -> None: ...
+
+    @overload
+    def __setitem__(self, arg0: slice, arg1: ContiguousEnumSlice, /) -> None: ...
+
+    @overload
+    def __delitem__(self, arg: int, /) -> None: ...
+
+    @overload
+    def __delitem__(self, arg: slice, /) -> None: ...
+
+    def __eq__(self, arg: object, /) -> bool: ...
+
+    def __ne__(self, arg: object, /) -> bool: ...
+
+    @overload
+    def __contains__(self, arg: ContiguousEnum, /) -> bool: ...
+
+    @overload
+    def __contains__(self, arg: object, /) -> bool: ...
+
+    def count(self, arg: ContiguousEnum, /) -> int:
+        """Return number of occurrences of `arg`."""
+
+    def remove(self, arg: ContiguousEnum, /) -> None:
+        """Remove first occurrence of `arg`."""
 
 class CyclicStructA:
     @overload
@@ -560,6 +607,22 @@ class ErrorStruct:
     @staticmethod
     def returns_result_option(is_some: bool) -> ErrorStruct | None: ...
 
+class FFIError:
+    def __init__(self, arg: FFIError.FFIError, /) -> None: ...
+
+    class FFIError(enum.Enum):
+        FFI = 0
+
+        User = 1
+
+    FFI: FFIError.FFIError = FFIError.FFIError.FFI
+
+    User: FFIError.FFIError = FFIError.FFIError.User
+
+    def __eq__(self, arg: FFIError.FFIError, /) -> bool: ...
+
+    def __repr__(self) -> str: ...
+
 class FallibleOpaqueConstructor:
     def __init__(self) -> None: ...
 
@@ -568,6 +631,36 @@ class FallibleOpaqueConstructor:
 
     @x.setter
     def x(self, arg: int, /) -> None: ...
+
+class FallibleTesterTrait(FallibleTesterTrait_PyBase):
+    @abstractmethod
+    def test_void_trait_fn() -> None: ...
+
+    @abstractmethod
+    def test_result_output( x : int ) -> int: ...
+
+from abc import abstractmethod
+class FallibleTesterTrait_PyBase():
+    def __init__() -> None: ...
+
+class FallibleTraitWrapper:
+    @overload
+    def __init__(self) -> None: ...
+
+    @overload
+    def __init__(self, cant_be_empty: bool | None) -> None: ...
+
+    @property
+    def cant_be_empty(self) -> bool: ...
+
+    @cant_be_empty.setter
+    def cant_be_empty(self, arg: bool, /) -> None: ...
+
+    @staticmethod
+    def test_result_output(t: FallibleTesterTrait_PyBase, x: int) -> int: ...
+
+    @staticmethod
+    def test_with_trait(t: FallibleTesterTrait_PyBase) -> None: ...
 
 class Float64Vec:
     @property
@@ -622,6 +715,9 @@ class Foo:
 
     @staticmethod
     def extract_from_fields(fields: BorrowedFields) -> Foo: ...
+
+    @staticmethod
+    def new_opt(x: str | None = None) -> Foo: ...
 
     @staticmethod
     def new_static(x: str) -> Foo: ...
@@ -790,6 +886,12 @@ class MyStruct:
     def g(self, arg: MyEnum, /) -> None: ...
 
     @staticmethod
+    def assert_enum_slice(slice: Sequence[ContiguousEnum], second_value: ContiguousEnum) -> None: ...
+
+    @staticmethod
+    def assert_slice(slice: Sequence[MyStruct], second_value: MyEnum) -> None: ...
+
+    @staticmethod
     def fails_zst_result() -> None: ...
 
     def into_a(self) -> int: ...
@@ -820,6 +922,61 @@ class MyStructContainingAnOption:
 
     @staticmethod
     def filled() -> MyStructContainingAnOption: ...
+
+class MyStructSlice:
+    @overload
+    def __init__(self) -> None:
+        """Default constructor"""
+
+    @overload
+    def __init__(self, arg: MyStructSlice) -> None:
+        """Copy constructor"""
+
+    @overload
+    def __init__(self, arg: Iterable[MyStruct], /) -> None:
+        """Construct from an iterable object"""
+
+    def __len__(self) -> int: ...
+
+    def __bool__(self) -> bool:
+        """Check whether the vector is nonempty"""
+
+    def __repr__(self) -> str: ...
+
+    def __iter__(self) -> Iterator[MyStruct]: ...
+
+    @overload
+    def __getitem__(self, arg: int, /) -> MyStruct: ...
+
+    @overload
+    def __getitem__(self, arg: slice, /) -> MyStructSlice: ...
+
+    def clear(self) -> None:
+        """Remove all items from list."""
+
+    def append(self, arg: MyStruct, /) -> None:
+        """Append `arg` to the end of the list."""
+
+    def insert(self, arg0: int, arg1: MyStruct, /) -> None:
+        """Insert object `arg1` before index `arg0`."""
+
+    def pop(self, index: int = -1) -> MyStruct:
+        """Remove and return item at `index` (default last)."""
+
+    def extend(self, arg: MyStructSlice, /) -> None:
+        """Extend `self` by appending elements from `arg`."""
+
+    @overload
+    def __setitem__(self, arg0: int, arg1: MyStruct, /) -> None: ...
+
+    @overload
+    def __setitem__(self, arg0: slice, arg1: MyStructSlice, /) -> None: ...
+
+    @overload
+    def __delitem__(self, arg: int, /) -> None: ...
+
+    @overload
+    def __delitem__(self, arg: slice, /) -> None: ...
 
 class MyZst:
     def __init__(self) -> None: ...
@@ -918,12 +1075,12 @@ class Opaque:
 class OpaqueCallbacks:
     def __init__(self, f: Callable[[MyString], MyString], st: MyString) -> None: ...
 
-    def opaque_cb_mut_self(self, cb: Callable[[MyString], MyString], st: MyString) -> MyString: ...
+    def opaque_cb_mut_self_fallible(self, cb: Callable[[MyString], MyString], st: MyString) -> MyString: ...
 
-    def opaque_cb_self(self, cb: Callable[[MyString], MyString], st: MyString) -> MyString: ...
+    def opaque_cb_self_fallible(self, cb: Callable[[MyString], MyString], st: MyString) -> MyString: ...
 
     @staticmethod
-    def ret_op(f: Callable[[MyString], MyString], st: MyString) -> MyString: ...
+    def ret_op_fallible(f: Callable[[MyString], MyString], st: MyString) -> MyString: ...
 
 class OpaqueMut:
     def __init__(self) -> None: ...
@@ -1428,6 +1585,25 @@ class StructWithSlices:
 
     def return_last(self) -> str: ...
 
+class TraitTestingStruct:
+    @overload
+    def __init__(self) -> None: ...
+
+    @overload
+    def __init__(self, x: int | None, y: int | None) -> None: ...
+
+    @property
+    def x(self) -> int: ...
+
+    @x.setter
+    def x(self, arg: int, /) -> None: ...
+
+    @property
+    def y(self) -> int: ...
+
+    @y.setter
+    def y(self, arg: int, /) -> None: ...
+
 class TupleStruct:
     @overload
     def __init__(self) -> None: ...
@@ -1509,7 +1685,7 @@ class Utf16Wrap:
 class __dummy__:
     pass
 
-def free_callback_holder(f: Callable[[], None]) -> None: ...
+def get_last_ffi_error() -> object: ...
 
 class monostate:
     def __repr__(self) -> str: ...

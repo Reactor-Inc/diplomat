@@ -3,7 +3,6 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write;
 
 use crate::{filters, ErrorStore, FileMap};
-use diplomat_core::hir::OutputOnly;
 use diplomat_core::hir::{
     self,
     borrowing_param::{
@@ -13,8 +12,10 @@ use diplomat_core::hir::{
     ReturnType, SelfType, SpecialMethod, SpecialMethodPresence, StructPathLike, SuccessType,
     TyPosition, Type, TypeContext, TypeDef, TypeId,
 };
+use diplomat_core::hir::{Attrs, OutputOnly};
 
 use askama::Template;
+use itertools::Itertools;
 
 mod formatter;
 use formatter::DartFormatter;
@@ -48,6 +49,7 @@ pub(crate) fn attr_support() -> BackendAttrSupport {
     a.generate_mocking_interface = false;
     a.owned_slices = true;
     a.struct_refs = true;
+    a.utf16_writeables = true;
 
     a
 }
@@ -165,7 +167,7 @@ impl<'cx> ItemGenContext<'_, 'cx> {
     fn gen(&mut self, id: TypeId) -> (String, String) {
         let ty = self.tcx.resolve_type(id);
 
-        let _guard = self.errors.set_context_ty(ty.name().as_str().into());
+        let _guard = self.errors.set_context_ty(ty.name_with_span().into());
 
         let name = self.formatter.fmt_type_name(id);
         (
@@ -181,14 +183,15 @@ impl<'cx> ItemGenContext<'_, 'cx> {
     }
 
     fn gen_enum(&mut self, ty: &'cx hir::EnumDef, type_name: &str) -> String {
+        let special =
+            self.gen_special_method_info(&ty.special_method_presence, &ty.attrs, type_name, false);
+
         let methods = ty
             .methods
             .iter()
             .filter(|m| !m.attrs.disable)
             .flat_map(|method| self.gen_method_info(method, type_name))
             .collect::<Vec<_>>();
-
-        let special = self.gen_special_method_info(&ty.special_method_presence);
 
         #[derive(Template)]
         #[template(path = "dart/enum.dart.jinja", escape = "none")]
@@ -216,6 +219,11 @@ impl<'cx> ItemGenContext<'_, 'cx> {
     }
 
     fn gen_opaque_def(&mut self, ty: &'cx hir::OpaqueDef, type_name: &str) -> String {
+        let mut special =
+            self.gen_special_method_info(&ty.special_method_presence, &ty.attrs, type_name, true);
+
+        special.implements.insert("ffi.Finalizable".into());
+
         let methods = ty
             .methods
             .iter()
@@ -224,7 +232,6 @@ impl<'cx> ItemGenContext<'_, 'cx> {
             .collect::<Vec<_>>();
 
         let destructor = &ty.dtor_abi_name;
-        let special = self.gen_special_method_info(&ty.special_method_presence);
 
         #[derive(Template)]
         #[template(path = "dart/opaque.dart.jinja", escape = "none")]
@@ -232,7 +239,7 @@ impl<'cx> ItemGenContext<'_, 'cx> {
             type_name: &'a str,
             methods: &'a [MethodInfo<'a>],
             docs: String,
-            deprecated: Option<&'a str>,
+            attrs: &'a Attrs,
             destructor: &'a str,
             lifetimes: &'a LifetimeEnv,
             special: SpecialMethodGenInfo<'a>,
@@ -242,7 +249,7 @@ impl<'cx> ItemGenContext<'_, 'cx> {
             type_name,
             methods: methods.as_slice(),
             destructor: destructor.as_str(),
-            deprecated: ty.attrs.deprecated.as_deref(),
+            attrs: &ty.attrs,
             docs: self.formatter.fmt_docs(&ty.docs),
             lifetimes: &ty.lifetimes,
             special,
@@ -258,6 +265,9 @@ impl<'cx> ItemGenContext<'_, 'cx> {
         type_name: &str,
         mutable: bool,
     ) -> String {
+        let special =
+            self.gen_special_method_info(&ty.special_method_presence, &ty.attrs, type_name, true);
+
         let fields = ty
             .fields
             .iter()
@@ -345,7 +355,6 @@ impl<'cx> ItemGenContext<'_, 'cx> {
             .filter(|m| !m.attrs.disable)
             .flat_map(|method| self.gen_method_info(method, type_name))
             .collect::<Vec<_>>();
-        let special = self.gen_special_method_info(&ty.special_method_presence);
 
         // Non-out structs need to be constructible in Dart
         let default_constructor =
@@ -359,7 +368,7 @@ impl<'cx> ItemGenContext<'_, 'cx> {
             mutable: bool,
             fields: Vec<FieldInfo<'a, P>>,
             methods: Vec<MethodInfo<'a>>,
-            deprecated: Option<&'a str>,
+            attrs: &'a Attrs,
             docs: String,
             lifetimes: &'a LifetimeEnv,
             special: SpecialMethodGenInfo<'a>,
@@ -371,7 +380,7 @@ impl<'cx> ItemGenContext<'_, 'cx> {
             mutable,
             fields,
             methods,
-            deprecated: ty.attrs.deprecated.as_deref(),
+            attrs: &ty.attrs,
             docs: self.formatter.fmt_docs(&ty.docs),
             lifetimes: &ty.lifetimes,
             special,
@@ -473,7 +482,7 @@ impl<'cx> ItemGenContext<'_, 'cx> {
         if method.attrs.disable {
             return None;
         }
-        let _guard = self.errors.set_context_method(method.name.as_str().into());
+        let _guard = self.errors.set_context_method((&method.name).into());
 
         let mut visitor = method.borrowing_param_visitor(self.tcx, false);
 
@@ -671,7 +680,6 @@ impl<'cx> ItemGenContext<'_, 'cx> {
 
         Some(MethodInfo {
             method,
-            deprecated: method.attrs.deprecated.as_deref(),
             docs,
             declaration,
             abi_name,
@@ -691,14 +699,33 @@ impl<'cx> ItemGenContext<'_, 'cx> {
     fn gen_special_method_info(
         &mut self,
         special_method_presence: &SpecialMethodPresence,
+        attrs: &hir::Attrs,
+        type_name: &str,
+        allow_superclass: bool,
     ) -> SpecialMethodGenInfo<'cx> {
-        let mut info = SpecialMethodGenInfo {
-            comparator: special_method_presence.comparator,
-            ..Default::default()
-        };
+        let mut info = SpecialMethodGenInfo::default();
+
+        if attrs.precondition_violation {
+            if allow_superclass {
+                info.extends = Some("core.Error".into());
+            } else {
+                info.implements.insert("core.Error".into());
+            }
+        } else if attrs.custom_errors {
+            info.implements.insert("core.Exception".into());
+        }
+
+        if special_method_presence.comparator {
+            info.implements
+                .insert(format!("core.Comparable<{type_name}>").into());
+            info.comparator = true;
+        }
 
         if let Some(ref val) = special_method_presence.iterator {
-            info.iterator = Some(self.gen_success_ty(val))
+            let val = self.gen_success_ty(val);
+            info.implements
+                .insert(format!("core.Iterator<{}>", val).into());
+            info.iterator = Some(val);
         }
         if let Some(ref iterator) = special_method_presence.iterable {
             let iterator_def = self.tcx.resolve_opaque(*iterator);
@@ -707,7 +734,9 @@ impl<'cx> ItemGenContext<'_, 'cx> {
                     .push_error("Found iterable not returning an iterator type".into());
                 return info;
             };
-            info.iterable = Some(self.gen_success_ty(val))
+            let val = self.gen_success_ty(val);
+            info.mixins.insert(format!("core.Iterable<{}>", val).into());
+            info.iterable = Some(val);
         }
 
         info
@@ -715,7 +744,7 @@ impl<'cx> ItemGenContext<'_, 'cx> {
 
     fn gen_success_ty(&mut self, out_ty: &SuccessType) -> Cow<'cx, str> {
         match out_ty {
-            SuccessType::Write => self
+            SuccessType::Write(..) => self
                 .formatter
                 .fmt_string_type(hir::StringEncoding::UnvalidatedUtf8)
                 .into(),
@@ -783,15 +812,15 @@ impl<'cx> ItemGenContext<'_, 'cx> {
         match *result_ty {
             ReturnType::Infallible(SuccessType::Unit)
             | ReturnType::Fallible(SuccessType::Unit, Some(_)) => self.formatter.fmt_void().into(),
-            ReturnType::Infallible(SuccessType::Write)
-            | ReturnType::Fallible(SuccessType::Write, Some(_)) => self
+            ReturnType::Infallible(SuccessType::Write(..))
+            | ReturnType::Fallible(SuccessType::Write(..), Some(_)) => self
                 .formatter
                 .fmt_string_type(hir::StringEncoding::Utf8)
                 .into(),
             ReturnType::Infallible(SuccessType::OutType(ref o))
             | ReturnType::Fallible(SuccessType::OutType(ref o), Some(_)) => self.gen_type_name(o),
-            ReturnType::Fallible(SuccessType::Write, None)
-            | ReturnType::Nullable(SuccessType::Write) => self
+            ReturnType::Fallible(SuccessType::Write(..), None)
+            | ReturnType::Nullable(SuccessType::Write(..)) => self
                 .formatter
                 .fmt_nullable(self.formatter.fmt_string_type(hir::StringEncoding::Utf8))
                 .into(),
@@ -854,7 +883,7 @@ impl<'cx> ItemGenContext<'_, 'cx> {
                 self.formatter.fmt_ffi_void()
             }
             .into(),
-            ReturnType::Infallible(SuccessType::Write) => if cast {
+            ReturnType::Infallible(SuccessType::Write(..)) => if cast {
                 self.formatter.fmt_void()
             } else {
                 self.formatter.fmt_ffi_void()
@@ -1131,8 +1160,14 @@ impl<'cx> ItemGenContext<'_, 'cx> {
     {
         match *result_ty {
             ReturnType::Infallible(SuccessType::Unit) => None,
-            ReturnType::Infallible(SuccessType::Write) => {
+            ReturnType::Infallible(SuccessType::Write(hir::WriteType::Str)) => {
                 Some(wrap_success("write.finalize()".to_string()))
+            }
+            ReturnType::Infallible(SuccessType::Write(hir::WriteType::Str16)) => {
+                Some(wrap_success("write.finalize16()".to_string()))
+            }
+            ReturnType::Infallible(SuccessType::Write(..)) => {
+                unreachable!("Unsupported WriteType")
             }
             ReturnType::Infallible(SuccessType::OutType(ref out_ty)) => {
                 let ok_conv = self.gen_c_to_dart_for_type(out_ty, "result".into(), lifetime_env);
@@ -1155,7 +1190,9 @@ impl<'cx> ItemGenContext<'_, 'cx> {
                 let err_check = format!("if (!result.isOk) {{\n  {err_statement}\n}}\n");
 
                 let success_expr = match ok {
-                    SuccessType::Write => "write.finalize()".to_string(),
+                    SuccessType::Write(hir::WriteType::Str) => "write.finalize()".to_string(),
+                    SuccessType::Write(hir::WriteType::Str16) => "write.finalize16()".to_string(),
+                    SuccessType::Write(..) => unreachable!("Unsupported WriteType"),
                     SuccessType::OutType(o) => self
                         .gen_c_to_dart_for_type(o, "result.union.ok".into(), lifetime_env)
                         .into_owned(),
@@ -1441,7 +1478,6 @@ fn is_contiguous_enum(ty: &hir::EnumDef) -> bool {
 struct MethodInfo<'a> {
     /// HIR of the method being rendered
     method: &'a hir::Method,
-    deprecated: Option<&'a str>,
     /// Docs
     docs: String,
     /// The declaration (everything before the parameter list)
@@ -1573,6 +1609,12 @@ struct StructBorrowContext<'tcx> {
 
 #[derive(Default)]
 struct SpecialMethodGenInfo<'a> {
+    /// The superclass
+    extends: Option<Cow<'a, str>>,
+    /// The set of mixins
+    mixins: BTreeSet<Cow<'a, str>>,
+    /// The set of implementations
+    implements: BTreeSet<Cow<'a, str>>,
     /// Whether it is a comparator
     comparator: bool,
     /// Whether it is an iterator, and the type it iterates over

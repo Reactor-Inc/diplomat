@@ -25,6 +25,7 @@ part 'CyclicStructC.g.dart';
 part 'DefaultEnum.g.dart';
 part 'ErrorEnum.g.dart';
 part 'ErrorStruct.g.dart';
+part 'FFIError.g.dart';
 part 'FallibleOpaqueConstructor.g.dart';
 part 'Float64Vec.g.dart';
 part 'Foo.g.dart';
@@ -1337,6 +1338,22 @@ final class _Write {
         throw const core.OutOfMemoryError();
       }
       return const Utf8Decoder().convert(buf.asTypedList(_diplomat_buffer_write_len(_ffi)));
+    } finally {
+      _diplomat_buffer_write_destroy(_ffi);
+    }
+  }
+
+  String finalize16() {
+    try {
+      final buf = _diplomat_buffer_write_get_bytes(_ffi);
+      if (buf == ffi.Pointer.fromAddress(0)) {
+        throw const core.OutOfMemoryError();
+      }
+      final len = _diplomat_buffer_write_len(_ffi) ~/ 2;
+      if (len == 0) {
+        return '';
+      }
+      return String.fromCharCodes(buf.cast<ffi.Uint16>().asTypedList(len));
     } finally {
       _diplomat_buffer_write_destroy(_ffi);
     }

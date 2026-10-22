@@ -29,7 +29,7 @@ pub(crate) fn attr_support() -> BackendAttrSupport {
     a.non_exhaustive_structs = false;
     a.method_overloading = true;
     a.utf8_strings = true;
-    a.utf16_strings = true;
+    a.utf16_strings = false;
     a.static_slices = true;
     a.defaults = true;
 
@@ -46,8 +46,15 @@ pub(crate) fn attr_support() -> BackendAttrSupport {
     a.arithmetic = true;
     a.indexing = true;
     a.option = true;
+
     a.callbacks = true;
-    a.traits = false;
+    a.traits = true;
+    // Based on the current assumption the user compiles with the GIL
+    // (this is an assumption made elsewehere throughout codegen)
+    a.traits_are_send = true;
+    a.traits_are_sync = true;
+    a.callback_returns_must_be_fallible = true;
+
     a.generate_mocking_interface = false;
     a.abi_compatibles = true;
     a.struct_refs = true;
@@ -112,6 +119,34 @@ pub(crate) fn run<'cx>(
     let mut root_module = RootModule::new();
     root_module.module_name = lib_name.clone().into();
 
+    struct FFIErrorsHeaderEntry<'a> {
+        name: std::borrow::Cow<'a, str>,
+        return_expr: String,
+        include_path: String,
+    }
+    // Hack for telling callbacks how to read FFI errors:
+    #[derive(Template)]
+    #[template(path = "nanobind/ffi_errors.h.jinja", escape = "none")]
+    struct FFIErrorsHeader<'a> {
+        entries: Vec<FFIErrorsHeaderEntry<'a>>,
+        lib_name: Option<String>,
+    }
+    let mut ffi_errors_header = FFIErrorsHeader {
+        entries: vec![],
+        lib_name: formatter.cxx.lib_name.clone(),
+    };
+
+    #[derive(Template)]
+    #[template(path = "nanobind/binding.cpp.jinja", escape = "none")]
+    struct Binding {
+        includes: BTreeSet<String>,
+        lib_name: String,
+        namespace: String,
+        unqualified_type: String,
+        body: String,
+        binding_prefix: String,
+    }
+
     let mut submodules = BTreeMap::new();
     for (id, ty) in tcx.all_types() {
         if ty.attrs().disable {
@@ -121,7 +156,8 @@ pub(crate) fn run<'cx>(
 
         let cpp_decl_path = formatter.cxx.fmt_decl_header_path(id.into());
         let cpp_impl_path = formatter.cxx.fmt_impl_header_path(id.into());
-        let binding_impl_path = format!("sub_modules/{}", formatter.fmt_binding_impl_path(id));
+        let binding_impl_path =
+            format!("sub_modules/{}", formatter.fmt_binding_impl_path(id.into()));
 
         let mut context = ItemGenContext {
             formatter: &formatter,
@@ -141,7 +177,7 @@ pub(crate) fn run<'cx>(
                 errors: &errors,
                 impl_header: &mut crate::cpp::Header::default(),
                 decl_header: &mut crate::cpp::Header::default(),
-                generating_struct_fields: false,
+                generate_definition_includes: false,
             },
             root_module: &mut root_module,
             submodules: &mut submodules,
@@ -154,23 +190,12 @@ pub(crate) fn run<'cx>(
             .includes
             .insert(cpp_impl_path.clone());
 
-        let guard = errors.set_context_ty(ty.name().as_str().into());
-
-        #[derive(Template)]
-        #[template(path = "nanobind/binding.cpp.jinja", escape = "none")]
-        struct Binding {
-            includes: BTreeSet<String>,
-            lib_name: String,
-            namespace: String,
-            unqualified_type: String,
-            body: String,
-            binding_prefix: String,
-        }
+        let guard = errors.set_context_ty(ty.name_with_span().into());
 
         let mut body = String::default();
         let mut binding_prefix = String::default();
         match ty {
-            hir::TypeDef::Enum(o) => context.gen_enum_def(o, id, &mut body),
+            hir::TypeDef::Enum(o) => context.gen_enum_def(o, id, &mut body, &mut binding_prefix),
             hir::TypeDef::Opaque(o) => context.gen_opaque_def(o, id, &mut body),
             hir::TypeDef::Struct(s) => {
                 context.gen_struct_def(s, id, &mut body, &mut binding_prefix)
@@ -189,6 +214,82 @@ pub(crate) fn run<'cx>(
             unqualified_type: formatter.cxx.fmt_type_name_unnamespaced(id).to_string(),
             body,
             binding_prefix,
+        };
+
+        if let hir::TypeDef::Enum(e) = ty {
+            let v = e.variants.iter().find(|v| v.attrs.ffi_error);
+            if let Some(v) = v {
+                let variant_name = formatter.cxx.fmt_enum_variant(v);
+                let enum_name = v.attrs.rename.apply(e.name.as_str().into());
+                let enum_name = if let Some(ns) = &e.attrs.namespace {
+                    format!("{ns}::{enum_name}").into()
+                } else {
+                    enum_name
+                };
+                ffi_errors_header.entries.push(FFIErrorsHeaderEntry {
+                    name: enum_name.clone(),
+                    return_expr: format!("{enum_name}::Value::{variant_name}"),
+                    include_path: cpp_decl_path.clone(),
+                });
+            }
+        };
+
+        files.add_file(binding_impl_path, binding_impl.to_string());
+    }
+
+    for (id, tr) in tcx.all_traits() {
+        if tr.attrs.disable {
+            continue;
+        }
+        let cpp_decl_path = formatter.cxx.fmt_decl_header_path(id.into());
+        let cpp_impl_path = formatter.cxx.fmt_impl_header_path(id.into());
+        let binding_impl_path =
+            format!("sub_modules/{}", formatter.fmt_binding_impl_path(id.into()));
+
+        let mut context = ItemGenContext {
+            formatter: &formatter,
+            errors: &errors,
+            config: &conf,
+            cpp: crate::cpp::ItemGenContext {
+                c: crate::c::ItemGenContext {
+                    tcx,
+                    formatter: &formatter.cxx.c,
+                    errors: &errors,
+                    decl_header_path: &cpp_decl_path,
+                    impl_header_path: &cpp_impl_path,
+                    is_for_cpp: false,
+                },
+                config: &conf,
+                formatter: &formatter.cxx,
+                errors: &errors,
+                impl_header: &mut crate::cpp::Header::default(),
+                decl_header: &mut crate::cpp::Header::default(),
+                generate_definition_includes: false,
+            },
+            root_module: &mut root_module,
+            submodules: &mut submodules,
+            generating_struct_fields: false,
+        };
+
+        context
+            .cpp
+            .impl_header
+            .includes
+            .insert(cpp_impl_path.clone());
+
+        let guard = errors.set_context_ty((&tr.name).into());
+
+        let mut body = String::default();
+        context.gen_trait_def(tr, id, &mut body);
+        drop(guard);
+
+        let binding_impl = Binding {
+            includes: context.cpp.impl_header.includes.clone(),
+            lib_name: lib_name.clone(),
+            namespace: formatter.fmt_namespaces(id.into()).join("::"),
+            unqualified_type: formatter.cxx.fmt_trait_name_unnamespaced(id).to_string(),
+            body,
+            binding_prefix: String::new(),
         };
 
         files.add_file(binding_impl_path, binding_impl.to_string());
@@ -212,7 +313,7 @@ pub(crate) fn run<'cx>(
             formatter: &formatter.cxx,
             impl_header: &mut Header::default(),
             decl_header: &mut Header::default(),
-            generating_struct_fields: false,
+            generate_definition_includes: false,
         },
         root_module: &mut root_module,
         submodules: &mut submodules,
@@ -323,6 +424,10 @@ pub(crate) fn run<'cx>(
         .remove(&vec![root_module.module_name.clone().into()]); // remove the root module from the list of submodules
 
     files.add_file(nanobind_filepath.to_owned(), root_module.to_string());
+    files.add_file(
+        "include/diplomat_ffi_errors.hpp".to_string(),
+        ffi_errors_header.render().unwrap(),
+    );
 
     (files, errors)
 }
@@ -345,8 +450,8 @@ mod test {
             {
                 Ok(context) => context,
                 Err(e) => {
-                    for (_cx, err) in e {
-                        eprintln!("Lowering error: {err}");
+                    for err in e {
+                        eprintln!("{err}");
                     }
                     panic!("Failed to create context")
                 }
@@ -391,7 +496,7 @@ mod test {
                     config: &config,
                     impl_header: &mut crate::cpp::Header::default(),
                     decl_header: &mut crate::cpp::Header::default(),
-                    generating_struct_fields: false,
+                    generate_definition_includes: false,
                 },
                 root_module: &mut root_module,
                 generating_struct_fields: false,
@@ -418,6 +523,11 @@ mod test {
                 #[diplomat::opaque]
                 struct OpaqueStruct;
 
+                pub enum FFIError {
+                    #[diplomat::attr(auto, ffi_error)]
+                    FFI,
+                }
+
                 impl OpaqueStruct {
                     pub fn new() -> Box<OpaqueStruct> {
                         Box::new(OpaqueStruct{})
@@ -427,12 +537,12 @@ mod test {
                         return true;
                     }
 
-                    pub fn takes_callback(f : impl Fn()) {
+                    pub fn takes_callback(f : impl Fn() -> Result<(), FFIError>) {
                         todo!()
                     }
 
                     #[diplomat::attr(*, rename="takes_callback")]
-                    pub fn takes_other_callback(f : impl Fn(bool)) {}
+                    pub fn takes_other_callback(f : impl Fn(bool) -> Result<(), FFIError>) {}
 
                     #[diplomat::attr(*, rename="new")]
                     pub fn str_slice_override(sl : &[DiplomatStrSlice]) {
@@ -449,8 +559,9 @@ mod test {
         let callback = |_, out| {
             insta::assert_snapshot!(out);
         };
+        let mut header = String::new();
         test_gen! {
-            Enum, gen_enum_def, [], callback,
+            Enum, gen_enum_def, [&mut header,], callback,
             {#[diplomat::bridge]
             #[diplomat::attr(auto, namespace = "mylib")]
             mod ffi {

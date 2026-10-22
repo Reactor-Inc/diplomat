@@ -8,6 +8,7 @@ pub mod ffi {
     use std::sync::Mutex;
 
     #[diplomat::opaque]
+    #[diplomat::attr(dotnet, manually_disposable)]
     #[diplomat::transparent_convert]
     pub struct Opaque(String);
 
@@ -31,6 +32,7 @@ pub mod ffi {
     }
 
     #[derive(Debug, PartialEq, Eq)]
+    #[diplomat::attr(auto, abi_compatible)]
     pub enum ContiguousEnum {
         C = 0,
         D = 1,
@@ -40,6 +42,7 @@ pub mod ffi {
     }
 
     #[diplomat::opaque]
+    #[diplomat::attr(dotnet, manually_disposable)]
     pub enum MyOpaqueEnum {
         A(String),
         B(Utf16Wrap),
@@ -53,6 +56,7 @@ pub mod ffi {
     }
 
     #[diplomat::attr(auto, mut_struct_ref)]
+    #[diplomat::attr(auto, abi_compatible)]
     pub struct MyStruct {
         a: u8,
         b: bool,
@@ -106,6 +110,13 @@ pub mod ffi {
             412
         }
 
+        // Gives the .NET tests a bool to assert in both marshalling directions;
+        // `not(dotnet)` disable keeps the other backends' fixtures untouched.
+        #[diplomat::attr(not(dotnet), disable)]
+        pub fn echo_bool(x: bool) -> bool {
+            x
+        }
+
         pub fn returns_imported() -> ImportedStruct {
             unimplemented!()
         }
@@ -143,7 +154,7 @@ pub mod ffi {
             other: &'a OpaqueMutexedString,
         ) -> &'a OpaqueMutexedString {
             let guard = self.0.lock().expect("Failed to lock mutex");
-            if guard.len() % 2 == 0 {
+            if guard.len().is_multiple_of(2) {
                 self
             } else {
                 other
@@ -155,7 +166,6 @@ pub mod ffi {
             guard.len() + other
         }
 
-        #[diplomat::attr(dotnet, disable)]
         pub fn dummy_str<'a>(&'a self) -> &'a DiplomatStr {
             "A const str with non byte char: 餐 which is a DiplomatChar,".as_bytes()
         }
@@ -174,7 +184,6 @@ pub mod ffi {
 
     impl Utf16Wrap {
         #[diplomat::attr(auto, constructor)]
-        #[diplomat::attr(dotnet, disable)]
         pub fn from_utf16(input: &DiplomatStr16) -> Box<Self> {
             Box::new(Self(input.into()))
         }
@@ -183,9 +192,20 @@ pub mod ffi {
             let _infallible = write!(write, "{:?}", self.0);
         }
 
-        #[diplomat::attr(dotnet, disable)]
         pub fn borrow_cont<'a>(&'a self) -> &'a DiplomatStr16 {
             &self.0
+        }
+
+        #[diplomat::cfg(supports = utf16_writeables)]
+        pub fn write_to(&self, write: &mut DiplomatWrite16) {
+            write.write_slice(&self.0);
+        }
+
+        #[diplomat::cfg(supports = utf16_writeables)]
+        pub fn write_chars(&self, write: &mut DiplomatWrite16) {
+            for c in char::decode_utf16(self.0.iter().copied()) {
+                write.write_char_as_utf16(c.unwrap_or(char::REPLACEMENT_CHARACTER));
+            }
         }
     }
 
@@ -291,6 +311,22 @@ pub mod ffi {
 
         pub fn fails_zst_result() -> Result<(), MyZst> {
             Err(MyZst {})
+        }
+
+        #[diplomat::cfg(supports=abi_compatibles)]
+        pub fn assert_slice(slice: &[MyStruct], second_value: MyEnum) {
+            assert!(slice.len() > 1);
+            let mut i = slice.iter();
+            i.next();
+            assert_eq!(i.next().unwrap().g, second_value);
+        }
+
+        #[diplomat::cfg(supports=abi_compatibles)]
+        pub fn assert_enum_slice(slice: &[ContiguousEnum], second_value: ContiguousEnum) {
+            assert!(slice.len() > 1);
+            let mut i = slice.iter();
+            i.next();
+            assert_eq!(*i.next().unwrap(), second_value);
         }
     }
 
@@ -678,6 +714,113 @@ pub mod ffi {
                 },
                 opaque: Opaque::new(),
             }
+        }
+    }
+
+    // Both halves of every marshal a C# property can present, so the generated
+    // accessors get compiled and run instead of only being checked as generated
+    // strings. .NET-only because it is the one backend that merges a getter and
+    // a setter into a single member, and so the only one that can get the
+    // pairing wrong.
+    #[diplomat::attr(not(dotnet), disable)]
+    #[diplomat::opaque_mut]
+    #[diplomat::attr(dotnet, manually_disposable)]
+    pub struct PropertyMarshals {
+        number: u32,
+        choice: DefaultEnum,
+        point: PrimitiveStruct,
+        held: String,
+        text: String,
+    }
+
+    impl PropertyMarshals {
+        pub fn create() -> Box<Self> {
+            Box::new(Self {
+                number: 0,
+                choice: DefaultEnum::A,
+                point: PrimitiveStruct {
+                    x: 0.,
+                    a: false,
+                    b: 0,
+                    c: 0,
+                    d: 0,
+                    e: 0,
+                },
+                held: String::new(),
+                text: String::new(),
+            })
+        }
+
+        #[diplomat::attr(auto, getter)]
+        pub fn number(&self) -> u32 {
+            self.number
+        }
+
+        #[diplomat::attr(auto, setter = "number")]
+        pub fn set_number(&mut self, value: u32) {
+            self.number = value;
+        }
+
+        #[diplomat::attr(auto, getter)]
+        pub fn choice(&self) -> DefaultEnum {
+            // Rebuilt rather than returned, because `DefaultEnum` is not `Copy`.
+            match self.choice {
+                DefaultEnum::A => DefaultEnum::A,
+                DefaultEnum::B => DefaultEnum::B,
+            }
+        }
+
+        #[diplomat::attr(auto, setter = "choice")]
+        pub fn set_choice(&mut self, value: DefaultEnum) {
+            self.choice = value;
+        }
+
+        #[diplomat::attr(auto, getter)]
+        pub fn point(&self) -> PrimitiveStruct {
+            self.point.clone()
+        }
+
+        #[diplomat::attr(auto, setter = "point")]
+        pub fn set_point(&mut self, value: PrimitiveStruct) {
+            self.point = value;
+        }
+
+        // An owned return paired with a borrowed parameter: both are the same C#
+        // type, so they share one property even though ownership differs.
+        #[diplomat::attr(auto, getter)]
+        pub fn held(&self) -> Box<Opaque> {
+            Box::new(Opaque(self.held.clone()))
+        }
+
+        #[diplomat::attr(auto, setter = "held")]
+        pub fn set_held(&mut self, value: &Opaque) {
+            self.held = value.0.clone();
+        }
+
+        // Written UTF-8 out, validated UTF-8 (`&str`) in: Rust may assume the
+        // bytes are well formed, so the binding has to transcode a real string.
+        #[diplomat::attr(auto, getter)]
+        pub fn utf8_text(&self, w: &mut DiplomatWrite) {
+            w.write_str(&self.text).unwrap();
+        }
+
+        #[diplomat::attr(auto, setter = "utf8_text")]
+        pub fn set_utf8_text(&mut self, value: &str) {
+            self.text = value.to_string();
+        }
+
+        // Same storage read back through a UTF-16 setter, which pins the C#
+        // string in place instead of transcoding it. Writing through one
+        // property and reading through the other proves both marshals present as
+        // the same `string`.
+        #[diplomat::attr(auto, getter)]
+        pub fn utf16_text(&self, w: &mut DiplomatWrite) {
+            w.write_str(&self.text).unwrap();
+        }
+
+        #[diplomat::attr(auto, setter = "utf16_text")]
+        pub fn set_utf16_text(&mut self, value: &DiplomatStr16) {
+            self.text = String::from_utf16_lossy(value);
         }
     }
 }

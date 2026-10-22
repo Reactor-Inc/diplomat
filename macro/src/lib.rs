@@ -40,6 +40,11 @@ fn param_ty(param_ty: &ast::TypeName) -> syn::Type {
             // not Rust stdlib types (which are not FFI-safe and must be converted)
             prim.get_diplomat_slice_type(ltmt)
         }
+        ast::TypeName::CustomTypeSlice(..) => {
+            // At the param boundary we MUST use FFI-safe diplomat slice types,
+            // not Rust stdlib types (which are not FFI-safe and must be converted)
+            param_ty.ffi_safe_version().to_syn()
+        }
         ast::TypeName::Option(..) if !param_ty.is_ffi_safe() => {
             param_ty.ffi_safe_version().to_syn()
         }
@@ -57,6 +62,7 @@ fn param_conversion(
         ast::TypeName::StrReference(.., StdlibOrDiplomat::Stdlib)
         | ast::TypeName::StrSlice(.., StdlibOrDiplomat::Stdlib)
         | ast::TypeName::PrimitiveSlice(.., StdlibOrDiplomat::Stdlib)
+        | ast::TypeName::CustomTypeSlice(.., StdlibOrDiplomat::Stdlib)
         | ast::TypeName::Result(..) => Some(if let Some(cast_to) = cast_to {
             quote!(let #name: #cast_to = #name.into();)
         } else {
@@ -138,12 +144,12 @@ fn gen_custom_vtable(custom_trait: &ast::Trait, custom_trait_vtable_type: &Ident
         pub alignment: usize,
     ));
     for m in &custom_trait.methods {
-        // TODO check that this is the right conversion, it might be the wrong direction
         let mut param_types: Vec<syn::Type> = m.params.iter().map(|p| param_ty(&p.ty)).collect();
         let method_name = Ident::new(&format!("run_{}_callback", m.name), Span::call_site());
         let return_tokens = match &m.output_type {
             Some(ret_ty) => {
-                let conv_ret_ty = ret_ty.to_syn();
+                let conv_ret_ty = ret_ty.ffi_safe_version().to_syn();
+
                 quote!( -> #conv_ret_ty)
             }
             None => {
@@ -194,7 +200,16 @@ fn gen_custom_trait_impl(custom_trait: &ast::Trait, custom_trait_struct_name: &I
         let (return_tokens, end_token) = match &m.output_type {
             Some(ret_ty) => {
                 let conv_ret_ty = ret_ty.to_syn();
-                (quote!( -> #conv_ret_ty), quote! {})
+                (
+                    quote!( -> #conv_ret_ty),
+                    match ret_ty {
+                        ast::TypeName::Result(_, _, StdlibOrDiplomat::Stdlib)
+                        | ast::TypeName::Option(_, StdlibOrDiplomat::Stdlib) => {
+                            quote!(.into())
+                        }
+                        _ => quote!(),
+                    },
+                )
             }
             None => (quote! {}, quote! {;}),
         };
@@ -273,6 +288,17 @@ struct FuncGen<'a> {
     attrs: &'a crate::ast::Attrs,
 }
 
+fn success_payload_tokens(ty: &ast::TypeName) -> (syn::Type, Option<TokenStream>) {
+    let ffi_safe_ty = ty.ffi_safe_version().to_syn();
+    let conversion = match ty {
+        ast::TypeName::Unit => None,
+        ast::TypeName::Ordering => Some(quote! { |value| value as i8 }),
+        _ if !ty.is_ffi_safe() => Some(quote! { <#ffi_safe_ty>::from }),
+        _ => None,
+    };
+    (ffi_safe_ty, conversion)
+}
+
 fn gen_custom_function(func_info: FuncGen) -> Item {
     let mut all_params = vec![];
 
@@ -329,15 +355,19 @@ fn gen_custom_function(func_info: FuncGen) -> Item {
 
     let (return_tokens, maybe_into) = if let Some(return_type) = func_info.return_type {
         if let ast::TypeName::Result(ok, err, StdlibOrDiplomat::Stdlib) = return_type {
-            let ok = ok.to_syn();
-            let err = err.to_syn();
+            let (ok_syn, ok_conversion) = success_payload_tokens(ok);
+            let err_syn = err.to_syn();
+            let ok_map = ok_conversion
+                .map(|conversion| quote! { .map(#conversion) })
+                .unwrap_or_default();
             (
-                quote! { -> diplomat_runtime::DiplomatResult<#ok, #err> },
-                quote! { .into() },
+                quote! { -> diplomat_runtime::DiplomatResult<#ok_syn, #err_syn> },
+                quote! { #ok_map .into() },
             )
         } else if let ast::TypeName::StrReference(_, _, StdlibOrDiplomat::Stdlib)
         | ast::TypeName::StrSlice(.., StdlibOrDiplomat::Stdlib)
-        | ast::TypeName::PrimitiveSlice(_, _, StdlibOrDiplomat::Stdlib) = return_type
+        | ast::TypeName::PrimitiveSlice(_, _, StdlibOrDiplomat::Stdlib)
+        | ast::TypeName::CustomTypeSlice(_, _, StdlibOrDiplomat::Stdlib) = return_type
         {
             let return_type_syn = return_type.ffi_safe_version().to_syn();
             (quote! { -> #return_type_syn }, quote! { .into() })
@@ -358,17 +388,14 @@ fn gen_custom_function(func_info: FuncGen) -> Item {
                 }
                 // anything else goes through DiplomatResult
                 _ => {
-                    let ty_s = ty.to_syn();
+                    let (ty_s, payload_conversion) = success_payload_tokens(ty);
+                    let payload_map = payload_conversion
+                        .map(|conversion| quote! { .map(#conversion) })
+                        .unwrap_or_default();
                     let conversion = if *is_std_option == StdlibOrDiplomat::Stdlib {
-                        quote! { .ok_or(()).into() }
+                        quote! { #payload_map .ok_or(()).into() }
                     } else {
-                        quote! {}
-                    };
-
-                    let conversion = if **ty == ast::TypeName::Ordering {
-                        quote! { .map(|i| i as i8) #conversion }
-                    } else {
-                        conversion
+                        payload_map
                     };
                     (
                         quote! { -> diplomat_runtime::DiplomatResult<#ty_s, ()> },
@@ -592,6 +619,9 @@ fn gen_bridge(mut input: ItemMod) -> ItemMod {
                 };
             }
         }
+        Item::Trait(t) => {
+            let _attrs = AttributeInfo::extract(&mut t.attrs);
+        }
         _ => (),
     });
 
@@ -814,6 +844,7 @@ mod tests {
             attrs: vec![],
             items: vec![item],
             shebang: None,
+            frontmatter: None,
         };
 
         prettyplease::unparse(&file)
@@ -1021,6 +1052,46 @@ mod tests {
 
                     impl Foo {
                         pub fn bar(&self) -> Result<(), ()> {
+                            unimplemented!()
+                        }
+                    }
+                }
+            })
+            .to_token_stream()
+        ));
+    }
+
+    #[test]
+    fn result_ok_owned_byte_slice_is_ffi_safe() {
+        insta::assert_snapshot!(pretty_print_code(
+            gen_bridge(parse_quote! {
+                mod ffi {
+                    struct Foo {}
+
+                    enum MyError {
+                        A,
+                    }
+
+                    impl Foo {
+                        pub fn bar(&self) -> Result<Box<[u8]>, MyError> {
+                            unimplemented!()
+                        }
+                    }
+                }
+            })
+            .to_token_stream()
+        ));
+    }
+
+    #[test]
+    fn option_owned_byte_slice_is_ffi_safe() {
+        insta::assert_snapshot!(pretty_print_code(
+            gen_bridge(parse_quote! {
+                mod ffi {
+                    struct Foo {}
+
+                    impl Foo {
+                        pub fn bar(&self) -> Option<Box<[u8]>> {
                             unimplemented!()
                         }
                     }
@@ -1265,6 +1336,45 @@ mod tests {
                         }
                         pub fn option_struct(x: Option<CustomStruct>) -> Option<CustomStruct> {
                             x
+                        }
+                    }
+                }
+            })
+            .to_token_stream()
+        ));
+    }
+    #[test]
+    fn mod_with_write_generic() {
+        insta::assert_snapshot!(pretty_print_code(
+            gen_bridge(parse_quote! {
+                mod ffi {
+                    use diplomat_runtime::DiplomatWriteGeneric;
+                    struct Foo {}
+
+                    impl Foo {
+                        pub fn get_ints(&self, out: &mut DiplomatWriteGeneric<u32>) {
+                            out.push(42);
+                        }
+                    }
+                }
+            })
+            .to_token_stream()
+        ));
+    }
+
+    #[test]
+    fn custom_type_slices_are_ffi_safe() {
+        insta::assert_snapshot!(pretty_print_code(
+            gen_bridge(parse_quote! {
+                mod ffi {
+                    pub struct Foo {
+                        pub x: u32,
+                    }
+
+                    impl Foo {
+                        pub fn slices<'a>(s: &'a [Foo], m: &'a mut [Foo]) -> &'a [Foo] {
+                            let _ = m;
+                            s
                         }
                     }
                 }

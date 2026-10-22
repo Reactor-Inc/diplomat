@@ -5,8 +5,9 @@
 //! 1. **Raw layer** (`Raw<Name>.cs`) — `[DllImport]` declarations, one per
 //!    user method plus the auto-generated `<Name>_destroy`. Fed to
 //!    `opaque.raw.cs.jinja`.
-//! 2. **Idiomatic layer** (`<Name>.cs`) — `IDisposable`-shaped wrapper class
-//!    that calls into the raw layer. Fed to `opaque.impl.cs.jinja`.
+//! 2. **Idiomatic layer** (`<Name>.cs`) — wrapper class that calls into the raw
+//!    layer (finalizer-only by default, optional public `IDisposable`). Fed to
+//!    `opaque.impl.cs.jinja`.
 //!
 //! Both templates consume the same [`super::method::MethodInfo`] — the
 //! kind-agnostic, layer-agnostic method view. The split between raw and
@@ -15,7 +16,8 @@
 use askama::Template;
 use diplomat_core::hir::{IdentBuf, OpaqueDef};
 
-use super::method::{self, MethodInfo, PropertyInfo};
+use super::accessor::PropertyInfo;
+use super::method::MethodInfo;
 use super::ItemGenContext;
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -39,11 +41,9 @@ struct OpaqueImplTemplate<'ctx> {
     name: String,
     namespace: &'ctx str,
     methods: Vec<MethodInfo<'ctx>>,
-    properties: Vec<PropertyInfo>,
-    /// Run-level: true iff any type in this generation run pins a slice. Gates
-    /// the `DiplomatPinnedMemory` Dispose sweep so a run with no pinned returns
-    /// emits nothing referencing the (System.Memory-dependent) helper.
-    uses_pinned_memory: bool,
+    properties: Vec<PropertyInfo<'ctx>>,
+    /// Per-opaque opt-in for generating a public `IDisposable` surface.
+    manually_disposable: bool,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -76,16 +76,15 @@ impl<'ctx, 'tcx> ItemGenContext<'ctx, 'tcx> {
         &self,
         display_name: String,
         methods: Vec<MethodInfo<'tcx>>,
-        uses_pinned_memory: bool,
+        properties: Vec<PropertyInfo<'tcx>>,
+        manually_disposable: bool,
     ) -> String {
-        let properties = method::collect_properties(&methods);
-
         OpaqueImplTemplate {
             name: display_name,
             namespace: self.namespace,
             methods,
             properties,
-            uses_pinned_memory,
+            manually_disposable,
         }
         .render()
         .unwrap()

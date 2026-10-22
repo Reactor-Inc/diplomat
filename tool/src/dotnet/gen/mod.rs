@@ -7,7 +7,8 @@
 //! Module layout:
 //!
 //! * [`opaque`] — `Raw[T].cs` `[DllImport]` declarations + the idiomatic
-//!   `IDisposable`-shaped wrapper class. Self-contained for a single
+//!   wrapper class (finalizer-only by default, optional public `IDisposable`).
+//!   Self-contained for a single
 //!   `OpaqueDef`.
 //! * [`lower`] — pure type-leaf lowering shared across opaque / struct /
 //!   enum: primitives → C# keywords, opaque paths → `T*`. New backends
@@ -30,6 +31,7 @@ use crate::{dotnet::gen::fillable::DotnetResult, ErrorStore};
 
 use super::formatter::DotnetFormatter;
 
+mod accessor;
 mod callback;
 pub(super) mod fillable;
 mod impl_struct;
@@ -37,6 +39,7 @@ mod lower;
 mod method;
 mod opaque;
 
+use self::accessor::{AccessorInfo, PropertyInfo};
 use self::impl_struct::StructField;
 use self::method::{MethodInfo, StructMethodContext};
 
@@ -65,8 +68,6 @@ pub(super) struct ItemGenContext<'ctx, 'tcx> {
     pub namespace: &'ctx str,
     pub exception_trim_suffix: Option<&'ctx str>,
     pub exception_message_method: Option<&'ctx str>,
-    pub getters_prefix: Option<&'ctx str>,
-    pub setters_prefix: Option<&'ctx str>,
 
     pub result_struct_registry: RefCell<HashMap<String, DotnetResult>>,
     pub option_struct_registry: RefCell<HashMap<String, fillable::DotnetOption>>,
@@ -95,7 +96,7 @@ pub(super) struct RenderedType {
 
 /// A type whose render data is built but not yet emitted. The two-phase split
 /// (build all, then render all) lets the run compute whether ANY type pins a
-/// slice before rendering opaque Dispose sweeps that reference the pin helper.
+/// slice before rendering opaque cleanup sweeps that reference the pin helper.
 enum PreparedType<'tcx> {
     /// No dependency on the run-level pin flag — already rendered (enums).
     Prerendered {
@@ -106,13 +107,25 @@ enum PreparedType<'tcx> {
     Opaque {
         display_name: String,
         opaque_def: &'tcx OpaqueDef,
-        methods: Vec<MethodInfo<'tcx>>,
+        members: TypeMembers<'tcx>,
     },
     Struct {
         display_name: String,
         fields: Vec<StructField>,
-        methods: Vec<MethodInfo<'tcx>>,
+        members: TypeMembers<'tcx>,
     },
+}
+
+/// A type's lowered methods, routed to where they render.
+///
+/// `raw_methods` keeps every one of them in declaration order: the raw layer
+/// declares one P/Invoke per Rust method however the idiomatic layer presents it,
+/// and the run-level helper flags have to see accessors too — a getter returning
+/// an owned byte slice needs `RustVec.cs` emitted just like a method would.
+struct TypeMembers<'tcx> {
+    raw_methods: Vec<MethodInfo<'tcx>>,
+    methods: Vec<MethodInfo<'tcx>>,
+    properties: Vec<PropertyInfo<'tcx>>,
 }
 
 impl PreparedType<'_> {
@@ -124,24 +137,33 @@ impl PreparedType<'_> {
         }
     }
 
+    /// Every lowered method, accessors included, or nothing for an
+    /// already-rendered type.
+    fn all_methods(&self) -> &[MethodInfo<'_>] {
+        match self {
+            Self::Prerendered { .. } => &[],
+            Self::Opaque { members, .. } | Self::Struct { members, .. } => &members.raw_methods,
+        }
+    }
+
     /// True iff any of this type's methods pins a borrowed slice.
     fn uses_pinned_memory(&self) -> bool {
-        match self {
-            Self::Prerendered { .. } => false,
-            Self::Opaque { methods, .. } | Self::Struct { methods, .. } => {
-                methods.iter().any(|m| m.has_pinned_inputs())
-            }
-        }
+        self.all_methods().iter().any(|m| m.has_pinned_inputs())
     }
 
     /// True iff any method returns an owned `Box<[u8]>`; gates its helpers.
     fn uses_owned_byte_slice_return(&self) -> bool {
-        match self {
-            Self::Prerendered { .. } => false,
-            Self::Opaque { methods, .. } | Self::Struct { methods, .. } => {
-                methods.iter().any(|m| m.return_type.is_owned_byte_slice())
-            }
-        }
+        self.all_methods()
+            .iter()
+            .any(|m| m.return_type.is_owned_byte_slice())
+    }
+
+    /// True iff any of this type's methods returns a `DiplomatBorrowedSpan<T>`.
+    /// Gates emitting that helper type the same way `uses_pinned_memory` gates
+    /// `DiplomatPinnedMemory` — independent flag, since a method can return a
+    /// borrowed span without pinning any input (e.g. borrowing only from `self`).
+    fn uses_borrowed_span(&self) -> bool {
+        self.all_methods().iter().any(|m| m.returns_borrowed_span())
     }
 }
 
@@ -195,21 +217,26 @@ impl<'ctx, 'tcx> ItemGenContext<'ctx, 'tcx> {
     }
 
     /// Render every non-disabled type to `(display_name, raw, content)`,
-    /// alongside the run-level `uses_pinned_memory` flag. Types are BUILT
-    /// first (each method lowered exactly once) so the flag is known before
-    /// the first opaque Dispose sweep — a pin edge lands on the RETURNED
-    /// type's wrapper, which may render before the method that pins into it.
-    pub(super) fn render_all_types(&self) -> (bool, bool, Vec<RenderedType>) {
+    /// alongside the run-level `uses_pinned_memory`, `uses_owned_byte_slice_return`,
+    /// and `uses_borrowed_span` flags — these gate which System.Memory-only
+    /// runtime helper files (`DiplomatPinnedMemory.cs`, `DiplomatBorrowedSpan.cs`,
+    /// the owned-byte-slice-return helpers) actually get emitted, independent
+    /// of per-type rendering. Types are BUILT first (each method lowered
+    /// exactly once, which is also where result/option struct registration
+    /// and diagnostics happen) so every flag reflects the whole run before
+    /// any file is written.
+    pub(super) fn render_all_types(&self) -> (bool, bool, bool, Vec<RenderedType>) {
         let mut prepared_types = Vec::new();
         let mut uses_pinned_memory = false;
         let mut uses_owned_byte_slice_return = false;
+        let mut uses_borrowed_span = false;
         for (id, ty) in self.tcx.all_types() {
             if ty.attrs().disable {
                 continue;
             }
             let display_name = self.formatter.fmt_type_name(id).into_owned();
             // Attribute any diagnostic pushed while lowering this type to it.
-            let _guard = self.errors.set_context_ty(display_name.clone().into());
+            let _guard = self.errors.set_context_ty(ty.name_with_span().into());
             // `None` means an unsupported shape (diagnostic already recorded);
             // the end-gate in `lib.rs` aborts before any file is written.
             let Some(prepared) = self.prepare_type(display_name, ty) else {
@@ -217,6 +244,7 @@ impl<'ctx, 'tcx> ItemGenContext<'ctx, 'tcx> {
             };
             uses_pinned_memory |= prepared.uses_pinned_memory();
             uses_owned_byte_slice_return |= prepared.uses_owned_byte_slice_return();
+            uses_borrowed_span |= prepared.uses_borrowed_span();
             prepared_types.push(prepared);
         }
 
@@ -224,7 +252,7 @@ impl<'ctx, 'tcx> ItemGenContext<'ctx, 'tcx> {
             .into_iter()
             .map(|prepared| {
                 let display_name = prepared.display_name().to_string();
-                let (raw, content) = self.render_prepared(prepared, uses_pinned_memory);
+                let (raw, content) = self.render_prepared(prepared);
                 RenderedType {
                     display_name,
                     raw,
@@ -232,7 +260,12 @@ impl<'ctx, 'tcx> ItemGenContext<'ctx, 'tcx> {
                 }
             })
             .collect();
-        (uses_pinned_memory, uses_owned_byte_slice_return, rendered)
+        (
+            uses_pinned_memory,
+            uses_owned_byte_slice_return,
+            uses_borrowed_span,
+            rendered,
+        )
     }
 
     /// Build a type's render data without emitting any C#. `build_method_info`
@@ -250,22 +283,39 @@ impl<'ctx, 'tcx> ItemGenContext<'ctx, 'tcx> {
                 // An unsupported field type skips the whole struct — there's
                 // no partial struct to emit.
                 let fields = self.lower_fields(struct_def)?;
-                let methods = self.build_methods(&struct_def.methods);
+                let field_names: Vec<&str> =
+                    fields.iter().map(|field| field.name.as_str()).collect();
+                let members = self.build_members(
+                    &display_name,
+                    &struct_def.methods,
+                    &field_names,
+                    false,
+                    false,
+                );
                 PreparedType::Struct {
                     display_name,
                     fields,
-                    methods,
+                    members,
                 }
             }
             hir::TypeDef::OutStruct(out_struct_def) => {
                 self.gen_out_struct(out_struct_def);
                 return None;
             }
-            hir::TypeDef::Opaque(opaque_def) => PreparedType::Opaque {
-                display_name,
-                opaque_def,
-                methods: self.build_methods(&opaque_def.methods),
-            },
+            hir::TypeDef::Opaque(opaque_def) => {
+                let members = self.build_members(
+                    &display_name,
+                    &opaque_def.methods,
+                    &[],
+                    true,
+                    opaque_def.attrs.manually_disposable,
+                );
+                PreparedType::Opaque {
+                    display_name,
+                    opaque_def,
+                    members,
+                }
+            }
             hir::TypeDef::Enum(enum_def) => {
                 // Enums never reference the pin helper, so render eagerly.
                 let (raw, content) = self.gen_enum(display_name.clone(), enum_def)?;
@@ -279,48 +329,82 @@ impl<'ctx, 'tcx> ItemGenContext<'ctx, 'tcx> {
         })
     }
 
-    /// Render a prepared type to `(raw, content)`. `uses_pinned_memory` is the
-    /// run-level flag threaded into the opaque template's Dispose sweep.
-    fn render_prepared(
-        &self,
-        prepared: PreparedType<'tcx>,
-        uses_pinned_memory: bool,
-    ) -> (Option<String>, String) {
+    /// Render a prepared type to `(raw, content)`.
+    fn render_prepared(&self, prepared: PreparedType<'tcx>) -> (Option<String>, String) {
         match prepared {
             PreparedType::Prerendered { raw, content, .. } => (raw, content),
             PreparedType::Opaque {
                 display_name,
                 opaque_def,
-                methods,
+                members,
             } => {
-                let raw = self.gen_opaque_raw(display_name.clone(), opaque_def, methods.clone());
-                let content = self.gen_opaque_impl(display_name, methods, uses_pinned_memory);
+                let TypeMembers {
+                    raw_methods,
+                    methods,
+                    properties,
+                } = members;
+                let raw = self.gen_opaque_raw(display_name.clone(), opaque_def, raw_methods);
+                let content = self.gen_opaque_impl(
+                    display_name,
+                    methods,
+                    properties,
+                    opaque_def.attrs.manually_disposable,
+                );
                 (Some(raw), content)
             }
             PreparedType::Struct {
                 display_name,
                 fields,
-                methods,
+                members,
             } => {
-                let raw =
-                    self.gen_struct_raw(display_name.clone(), fields.clone(), methods.clone());
+                let TypeMembers {
+                    raw_methods,
+                    methods,
+                    properties,
+                } = members;
+                let raw = self.gen_struct_raw(display_name.clone(), fields.clone(), raw_methods);
                 // Structs are value types with no Dispose, so no pin sweep —
                 // their only pin references live in per-method bodies.
-                let content = self.gen_struct_impl(display_name, fields, methods);
+                let content = self.gen_struct_impl(display_name, fields, methods, properties);
                 (Some(raw), content)
             }
         }
     }
 
-    /// Lower each method exactly once, sharing the `MethodInfo`s across the raw
-    /// and idiomatic templates. A method with an unsupported shape is dropped
-    /// (its diagnostic was recorded during lowering); the end-gate aborts the
-    /// whole run before any file is written.
-    fn build_methods(&self, methods: &'tcx [hir::Method]) -> Vec<MethodInfo<'tcx>> {
-        methods
+    /// Lower each method exactly once and route it as it is built: an accessor
+    /// goes into the property it backs, everything else stays a method. The
+    /// `MethodInfo`s are shared with the raw template, so no method is lowered
+    /// twice. A method with an unsupported shape is dropped (its diagnostic was
+    /// recorded during lowering); the end-gate aborts the whole run before any
+    /// file is written.
+    fn build_members(
+        &self,
+        display_name: &str,
+        methods: &'tcx [hir::Method],
+        field_names: &[&str],
+        is_opaque: bool,
+        has_generated_dispose: bool,
+    ) -> TypeMembers<'tcx> {
+        let lowered: Vec<(Option<AccessorInfo>, MethodInfo<'tcx>)> = methods
             .iter()
             .filter_map(|m| self.build_method_info(StructMethodContext::new(m)))
-            .collect()
+            .collect();
+        let raw_methods = lowered.iter().map(|(_, m)| m.clone()).collect();
+        let (methods, properties) = accessor::route_members(lowered, self.errors);
+        accessor::reject_member_collisions(
+            display_name,
+            &properties,
+            &methods,
+            field_names,
+            is_opaque,
+            has_generated_dispose,
+            self.errors,
+        );
+        TypeMembers {
+            raw_methods,
+            methods,
+            properties,
+        }
     }
 
     pub(crate) fn gen_out_struct(
@@ -398,7 +482,9 @@ impl<'ctx, 'tcx> ItemGenContext<'ctx, 'tcx> {
 /// `Ordering` and `Int128` have no C# representation yet; they're rejected
 /// in [`ItemGenContext::lower_primitive`] with a recorded diagnostic rather
 /// than constructed here.
-#[derive(Debug, Clone)]
+// `PartialEq`/`Eq` so an accessor's property type can be compared against its
+// counterpart's — see `gen::accessor`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum DotnetPrimitives {
     Bool,
     SByte,

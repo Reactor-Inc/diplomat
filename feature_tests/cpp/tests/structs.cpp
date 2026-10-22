@@ -1,6 +1,7 @@
 #include <iostream>
 #include "../include/MyStruct.hpp"
 #include "../include/MyEnum.hpp"
+#include "../include/ContiguousEnum.hpp"
 #include "../include/Opaque.hpp"
 #include "../include/StructArithmetic.hpp"
 #include "../include/ns/RenamedOpaqueArithmetic.hpp"
@@ -12,6 +13,7 @@
 #include "../include/ImmutableStructOfOpaque.hpp"
 #include "../include/TupleStruct.hpp"
 #include "../include/OutTupleStruct.hpp"
+#include "../include/Utf16Wrap.hpp"
 #include "assert.hpp"
 
 using namespace somelib;
@@ -39,6 +41,12 @@ int main(int argc, char* argv[]) {
 
     MyStruct default_s;
     simple_assert_eq("default struct values", default_s.g.into_value(), MyEnum(MyEnum::D).into_value());
+
+    MyStruct myStructArr[] { s, default_s };
+    MyStruct::assert_slice(diplomat::span<const MyStruct>(myStructArr, 2), MyEnum::D);
+
+    ContiguousEnum enumArr[] { ContiguousEnum::C, ContiguousEnum::F };
+    MyStruct::assert_enum_slice(diplomat::span<const ContiguousEnum>(enumArr, 2), ContiguousEnum::F);
 
     auto a = StructArithmetic{ 1, 2 };
     auto b = StructArithmetic{ 2, 3 };
@@ -184,4 +192,9 @@ int main(int argc, char* argv[]) {
     auto containing_tuple = std::tuple<std::tuple<int32_t, int32_t, MyStruct, const Opaque&>>{tuple_in};
     simple_assert_eq("Tuple containing input", (uint32_t)TupleStruct::takes_containing(containing_tuple), (uint32_t)'A');
 
+    auto utf16_wrap = Utf16Wrap::from_utf16(u"Hello 𐐷!");
+    simple_assert("Utf16Wrap write_to", utf16_wrap->write_to() == u"Hello 𐐷!");
+    simple_assert("Utf16Wrap write_chars", utf16_wrap->write_chars() == u"Hello 𐐷!");
+    auto utf16_empty = Utf16Wrap::from_utf16(u"");
+    simple_assert("Utf16Wrap empty write_to", utf16_empty->write_to() == u"");
 }

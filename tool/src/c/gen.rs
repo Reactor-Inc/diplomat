@@ -16,6 +16,7 @@ struct EnumTemplate<'a> {
     fmt: &'a CFormatter<'a>,
     ty_name: &'a str,
     is_for_cpp: bool,
+    is_sliceable: bool,
 }
 
 #[derive(Template)]
@@ -63,6 +64,19 @@ pub struct MethodInfo<'a> {
     abi_name: &'a str,
 }
 
+/// Like [MethodInfo], but for callbacks (as such, no ABI names).
+pub struct CallbackInfo<'a> {
+    pub return_ty: Cow<'a, str>,
+    /// A list of the types only.
+    pub params: Vec<Cow<'a, str>>,
+}
+
+/// Information of the method signatures found on a trait.
+/// Used by the C++ backend to use typing to determine how to convert from the C ABI to the given language.
+pub struct TraitInfo<'a> {
+    pub methods: Vec<CallbackInfo<'a>>,
+}
+
 /// Information for constructing a C struct required for callback return informatioon.
 #[derive(Clone)]
 pub struct CallbackAndStructDef {
@@ -94,6 +108,7 @@ impl<'tcx> ItemGenContext<'_, 'tcx, '_> {
             fmt: self.formatter,
             ty_name: &ty_name,
             is_for_cpp: self.is_for_cpp,
+            is_sliceable: def.attrs.abi_compatible && def.usage.sliced,
         }
         .render_into(&mut decl_header)
         .unwrap();
@@ -144,13 +159,14 @@ impl<'tcx> ItemGenContext<'_, 'tcx, '_> {
         decl_header
     }
 
-    pub fn gen_trait_def(&self, id: hir::TraitId) -> Header {
+    pub fn gen_trait_def(&self, id: hir::TraitId) -> (TraitInfo<'tcx>, Header) {
         let def = self.tcx.resolve_trait(id);
         let mut decl_header = Header::new(self.decl_header_path.to_owned(), self.is_for_cpp);
         let trt_name = self.formatter.fmt_trait_name(id);
 
         let mut trait_structs = vec![];
         let mut method_sigs = vec![];
+        let mut trait_methods = vec![];
         for m in &def.methods {
             let mut param_types: Vec<Cow<'tcx, str>> = m
                 .params
@@ -188,6 +204,11 @@ impl<'tcx> ItemGenContext<'_, 'tcx, '_> {
                 _ => unreachable!("unknown AST/HIR variant"),
             };
 
+            trait_methods.push(CallbackInfo {
+                return_ty: ret_type.clone(),
+                params: param_types.clone(),
+            });
+
             method_sigs.push(format!(
                 "{} (*run_{}_callback)({});",
                 ret_type,
@@ -205,7 +226,12 @@ impl<'tcx> ItemGenContext<'_, 'tcx, '_> {
         .render_into(&mut decl_header)
         .unwrap();
 
-        decl_header
+        (
+            TraitInfo {
+                methods: trait_methods,
+            },
+            decl_header,
+        )
     }
 
     pub fn gen_function_impls(
@@ -222,7 +248,7 @@ impl<'tcx> ItemGenContext<'_, 'tcx, '_> {
                 // Skip method if disabled
                 continue;
             }
-            let _guard = self.errors.set_context_method(method.name.as_str().into());
+            let _guard = self.errors.set_context_method((&method.name).into());
             let (method_chunk, callback_defs) = self.gen_method(method, &mut impl_header);
             methods.push(method_chunk);
             cb_structs_and_defs.extend_from_slice(&callback_defs);
@@ -254,9 +280,7 @@ impl<'tcx> ItemGenContext<'_, 'tcx, '_> {
     // Generate a block of implementations for functions on any given type
     pub fn gen_impl(&self, id: hir::TypeId) -> Header {
         let ty = self.tcx.resolve_type(id);
-        let _guard = self
-            .errors
-            .set_context_ty(self.tcx.fmt_type_name_diagnostics(id));
+        let _guard = self.errors.set_context_ty(ty.name_with_span().into());
 
         let mut impl_header = self.gen_function_impls(Some(id), ty.methods().iter());
 
@@ -308,7 +332,7 @@ impl<'tcx> ItemGenContext<'_, 'tcx, '_> {
 
         let return_ty: Cow<str> = match method.output {
             ReturnType::Infallible(SuccessType::Unit) => "void".into(),
-            ReturnType::Infallible(SuccessType::Write) => {
+            ReturnType::Infallible(SuccessType::Write(..)) => {
                 param_decls.push((
                     format!("{}*", self.formatter.fmt_write_name()).into(),
                     "write".into(),
@@ -324,7 +348,7 @@ impl<'tcx> ItemGenContext<'_, 'tcx, '_> {
                     None
                 };
                 let ok_ty = match ok {
-                    SuccessType::Write => {
+                    SuccessType::Write(..) => {
                         param_decls.push((
                             format!("{}*", self.formatter.fmt_write_name()).into(),
                             "write".into(),
@@ -460,13 +484,20 @@ impl<'tcx> ItemGenContext<'_, 'tcx, '_> {
             }
             Type::ImplTrait(t) => {
                 let t_id = t.id();
-                let trt_name = self.gen_ty_name(ty, header);
-                if self.tcx.resolve_trait(t_id).attrs.disable {
-                    self.errors
-                        .push_error(format!("Found usage of disabled trait {trt_name}"))
+                let trt_name_maybe_namespaced = self.gen_ty_name(ty, header);
+                let res = self.tcx.resolve_trait(t_id);
+                if res.attrs.disable {
+                    self.errors.push_error(format!(
+                        "Found usage of disabled trait {trt_name_maybe_namespaced}"
+                    ))
                 }
+
+                let trait_name_unnamespaced = self.formatter.fmt_trait_name(t_id);
                 (
-                    format!("DiplomatTraitStruct_{trt_name}").into(),
+                    self.formatter.diplomat_namespace_for_custom_type(
+                        format!("DiplomatTraitStruct_{trait_name_unnamespaced}").into(),
+                        res.attrs.namespace.as_deref(),
+                    ),
                     format!("{param_name}_trait_wrap").into(),
                 )
             }
@@ -595,9 +626,23 @@ impl<'tcx> ItemGenContext<'_, 'tcx, '_> {
 
                     st_name
                 }
+                hir::Slice::Enum(borrow, ref enm_ty) => {
+                    let enm_id: TypeId = enm_ty.tcx_id.into();
+                    let enm_name = self.formatter.fmt_enum_slice_name(*borrow, enm_ty);
+
+                    if self.tcx.resolve_type(enm_id).attrs().disable {
+                        self.errors
+                            .push_error(format!("Found usage of disabled type {enm_name}"))
+                    }
+
+                    let header_path = self.formatter.fmt_decl_header_path(enm_id.into());
+                    header.includes.insert(header_path);
+
+                    enm_name
+                }
                 hir::Slice::Opaque(borrow, ref op_ty) => {
                     let op_id = op_ty.id();
-                    let op_name = self.formatter.fmt_opaque_slice_name(*borrow, op_id);
+                    let op_name = self.formatter.fmt_type_slice_name(*borrow, op_id);
 
                     if self.tcx.resolve_type(op_id).attrs().disable {
                         self.errors

@@ -5,7 +5,9 @@ use crate::cpp::ExtraCode;
 use crate::read_custom_binding;
 use crate::{cpp::ItemGenContext as CppItemGenContext, hir, ErrorStore};
 use askama::Template;
-use diplomat_core::hir::{IncludeLocation, IncludeSource, SymbolId, TyPosition, Type, TypeId};
+use diplomat_core::hir::{
+    IncludeLocation, IncludeSource, SymbolId, TraitDef, TraitId, TyPosition, Type, TypeId,
+};
 use std::borrow::Cow;
 use std::collections::BTreeSet;
 use std::collections::{BTreeMap, HashMap};
@@ -138,11 +140,12 @@ impl<'ccx, 'tcx: 'ccx> ItemGenContext<'ccx, 'tcx> {
     /// C enum type. This enables us to add methods to the enum and generally make the enum
     /// behave more like an upgraded C++ type. We don't use `enum class` because methods
     /// cannot be added to it.
-    pub fn gen_enum_def<W: std::fmt::Write + ?Sized>(
+    pub fn gen_enum_def(
         &mut self,
         ty: &'tcx hir::EnumDef,
         id: TypeId,
-        out: &mut W,
+        out: &mut dyn std::fmt::Write,
+        binding_prefix: &mut dyn std::fmt::Write,
     ) {
         let type_name = self.formatter.cxx.fmt_type_name(id);
         let type_name_unnamespaced = self.formatter.cxx.fmt_type_name_unnamespaced(id);
@@ -166,6 +169,15 @@ impl<'ccx, 'tcx: 'ccx> ItemGenContext<'ccx, 'tcx> {
             type_name_unnamespaced: &'a str,
             extra_init_code: ExtraCode,
             docs: Option<String>,
+            is_sliceable: bool,
+        }
+
+        if ty.attrs.abi_compatible {
+            write!(binding_prefix, "NB_MAKE_OPAQUE(std::vector<{type_name}>)")
+                .expect("Could not write to header.");
+            if ty.special_method_presence.comparator {
+                write!(binding_prefix, "\nnamespace nanobind::detail {{ template<> struct is_equality_comparable<{type_name}>{{static constexpr bool value = false;}}; }}").expect("Could not write to header");
+            }
         }
 
         ImplTemplate {
@@ -174,18 +186,19 @@ impl<'ccx, 'tcx: 'ccx> ItemGenContext<'ccx, 'tcx> {
             type_name_unnamespaced: &type_name_unnamespaced,
             extra_init_code,
             docs: self.formatter.fmt_doc_literal(&ty.docs, &ty.attrs),
+            is_sliceable: ty.attrs.abi_compatible,
         }
         .render_into(out)
         .unwrap();
 
-        self.add_to_root_module(id);
+        self.add_to_root_module(id.into());
     }
 
-    pub fn add_to_root_module(&mut self, id: TypeId) {
-        self.gen_modules(id.into(), None);
+    pub fn add_to_root_module(&mut self, id: SymbolId) {
+        self.gen_modules(id, None);
         Self::gen_binding_fn(
             self.root_module,
-            self.formatter.fmt_namespaces(id.into()),
+            self.formatter.fmt_namespaces(id),
             self.formatter.fmt_binding_fn(id),
         );
     }
@@ -216,15 +229,13 @@ impl<'ccx, 'tcx: 'ccx> ItemGenContext<'ccx, 'tcx> {
         entry.push(namespaced_binding_fn);
     }
 
-    pub fn gen_opaque_def<W: std::fmt::Write + ?Sized>(
+    pub fn gen_opaque_def(
         &mut self,
         ty: &'tcx hir::OpaqueDef,
         id: TypeId,
-        out: &mut W,
+        out: &mut dyn std::fmt::Write,
     ) {
-        let _guard = self
-            .errors
-            .set_context_ty(self.cpp.c.tcx.fmt_symbol_name_diagnostics(id.into()));
+        let _guard = self.errors.set_context_ty((&ty.name).into());
 
         let type_name = self.formatter.cxx.fmt_type_name(id);
         let type_name_unnamespaced = self.formatter.cxx.fmt_type_name_unnamespaced(id);
@@ -251,15 +262,15 @@ impl<'ccx, 'tcx: 'ccx> ItemGenContext<'ccx, 'tcx> {
         }
         .render_into(out)
         .unwrap();
-        self.add_to_root_module(id);
+        self.add_to_root_module(id.into());
     }
 
-    pub fn gen_struct_def<P: TyPosition, W: std::fmt::Write + ?Sized>(
+    pub fn gen_struct_def<P: TyPosition>(
         &mut self,
         def: &'tcx hir::StructDef<P>,
         id: TypeId,
-        out: &mut W,
-        binding_prefix: &mut W,
+        out: &mut dyn std::fmt::Write,
+        binding_prefix: &mut dyn std::fmt::Write,
     ) {
         let type_name = self.formatter.cxx.fmt_type_name(id);
         let type_name_unnamespaced = self.formatter.cxx.fmt_type_name_unnamespaced(id);
@@ -322,7 +333,91 @@ impl<'ccx, 'tcx: 'ccx> ItemGenContext<'ccx, 'tcx> {
         }
         .render_into(out)
         .unwrap();
-        self.add_to_root_module(id);
+        self.add_to_root_module(id.into());
+    }
+
+    pub fn gen_trait_def(
+        &mut self,
+        def: &'tcx TraitDef,
+        id: TraitId,
+        out: &mut dyn std::fmt::Write,
+    ) {
+        struct TraitMethodInfo<'a> {
+            name: Cow<'a, str>,
+            return_type_name: Cow<'a, str>,
+            python_return_name: Cow<'a, str>,
+            python_params: Vec<(Cow<'a, str>, Cow<'a, str>)>,
+            params: Vec<NamedType<'a, hir::OutputOnly>>,
+
+            /// What to return if the trait fails a cast.
+            ffi_failed_return: String,
+            docs: Option<String>,
+        }
+
+        #[derive(Template)]
+        #[template(path = "nanobind/trait_impl.cpp.jinja", escape = "none")]
+        struct ImplTemplate<'a> {
+            trait_name: Cow<'a, str>,
+            trait_name_unnamespaced: Cow<'a, str>,
+            methods: &'a [TraitMethodInfo<'a>],
+
+            docs: Option<String>,
+        }
+
+        let trait_name = self.formatter.cxx.fmt_symbol_name(id.into());
+        let trait_name_unnamespaced = self.formatter.cxx.fmt_trait_name_unnamespaced(id);
+
+        let methods = def.methods.iter().map(|m| {
+
+            let ffi_failed_return = match m.output.as_ref() {
+                hir::ReturnType::Fallible(_, Some(err)) => match err {
+                    Type::Enum(e) => {
+                        let ffi_error_name = e.resolve(self.cpp.c.tcx).variants.iter().find(|v| v.attrs.ffi_error);
+                        if let Some(f) = ffi_error_name {
+                            let enum_name = self.cpp.formatter.fmt_type_name(e.tcx_id.into());
+                            let variant_name = self.cpp.formatter.fmt_enum_variant(f);
+                            format!("{enum_name}({enum_name}::Value::{variant_name})")
+                        } else {
+                            unreachable!("Enum variant with FFI error not found (this should have been caught by the HIR)");
+                        }
+                    }
+                    _ => unreachable!("Unsupported fallible type: {err:?} (this should have been caught by the HIR)"),
+                }
+                hir::ReturnType::Infallible(hir::SuccessType::Unit) => "".into(),
+                _ => unreachable!("Unsupported trait return type {:?} (this should have been caught by the HIR)", m.output)
+            };
+            TraitMethodInfo {
+                name: m.name.as_ref().expect("Could not get trait method name").as_str().into(),
+                return_type_name: self.cpp.gen_cpp_return_type_name(&m.output, false),
+                python_return_name: self.formatter.return_type_to_python_type(&m.output),
+                python_params: m.params.iter().map(|p| {
+                    (p.name.as_ref().expect("Could not get name").as_str().into(), self.formatter.hir_type_to_python_type(&p.ty))
+                }).collect(),
+                params: m.params.iter().map(|p| {
+                    NamedType {
+                        name: p.name.as_ref().expect("Could not get trait param name").as_str().into(),
+                        type_name: self.cpp.gen_type_name(&p.ty),
+                        ty: &p.ty,
+                        default_value: None,
+                        docstring: None
+                    }
+                }).collect::<Vec<_>>(),
+                ffi_failed_return,
+                docs: self.formatter.fmt_doc_literal(&def.docs, &def.attrs),
+            }
+        }).collect::<Vec<_>>();
+
+        ImplTemplate {
+            trait_name,
+            trait_name_unnamespaced,
+            methods: methods.as_slice(),
+
+            docs: self.formatter.fmt_doc_literal(&def.docs, &def.attrs),
+        }
+        .render_into(out)
+        .unwrap();
+
+        self.add_to_root_module(id.into());
     }
 
     fn gen_all_method_infos(
@@ -448,7 +543,7 @@ impl<'ccx, 'tcx: 'ccx> ItemGenContext<'ccx, 'tcx> {
         if method.attrs.disable {
             return None;
         }
-        let _guard = self.errors.set_context_method(method.name.as_str().into());
+        let _guard = self.errors.set_context_method((&method.name).into());
         let cpp_method_name = self.formatter.cxx.fmt_method_name(method);
         let method_name = self.formatter.fmt_method_name(method);
 

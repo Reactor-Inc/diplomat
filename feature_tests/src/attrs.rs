@@ -11,6 +11,8 @@ use super::*;
 #[diplomat::include("src/attrs/mixins.rs")]
 #[diplomat::include("src/attrs/cache_test.rs")]
 pub mod ffi {
+    use crate::callbacks::ffi::FFIError;
+
     super::mixin_macro! {}
     super::cache_test_macro! {RenamedCachedIncludeZST}
 
@@ -32,6 +34,7 @@ pub mod ffi {
     macro_rules! create_vec {
         ($vec_name:ident contains "hello"; [$ty:ident]) => {
             #[diplomat::opaque_mut]
+            #[diplomat::attr(dotnet, manually_disposable)]
             pub struct $vec_name(Vec<$ty>);
 
             impl $vec_name {
@@ -62,6 +65,7 @@ pub mod ffi {
 
     #[derive(Clone)]
     #[diplomat::opaque]
+    #[diplomat::attr(dotnet, manually_disposable)]
     // Attr for generating mocking interface in kotlin backend to enable JVM test fakes.
     #[diplomat::attr(kotlin, generate_mocking_interface)]
     #[diplomat::attr(*, rename = "AttrOpaque1Renamed")]
@@ -89,7 +93,7 @@ pub mod ffi {
         }
 
         #[diplomat::attr(any(not(supports=callbacks), kotlin), disable)]
-        pub fn test_namespaced_callback(_t: impl Fn() -> Result<(), ()>) {
+        pub fn test_namespaced_callback(_t: impl Fn() -> Result<(), FFIError>) {
             todo!()
         }
 
@@ -130,6 +134,7 @@ pub mod ffi {
     }
 
     #[diplomat::opaque]
+    #[diplomat::attr(dotnet, manually_disposable)]
     #[diplomat::attr(auto, namespace = "")]
     #[diplomat::attr(*, rename = "Unnamespaced")]
     pub struct Unnamespaced;

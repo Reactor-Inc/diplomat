@@ -1,9 +1,15 @@
 import somelib
+import pytest
+import sys
 
 def test_callback():
     o = somelib.CallbackWrapper
     global tmp
     tmp = 0
+
+    with pytest.raises(RuntimeError) as e:
+        somelib.get_last_ffi_error()
+    assert e.value.args[0] == "FFI Error not found, either no FFI error was set or the FFI error has been freed."
     
     def cb0(a: int) -> int:
         global tmp
@@ -12,7 +18,7 @@ def test_callback():
     
     print("test0")
 
-    out = o.test_multi_arg_callback(cb0, 5)
+    out = o.test_multi_arg_callback_fallible(cb0, 5)
     assert tmp == 15, "multi_arg_callback arg "
     assert out == 20, "multi_arg_callback output"
     
@@ -22,7 +28,7 @@ def test_callback():
     def cb1():
         global tmp
         tmp = tmp+1
-    out = o.test_no_args(cb1)
+    out = o.test_no_args_fallible(cb1)
     assert tmp == 2, "test_no_args arg "
     assert out == -5, "test_no_args output"
     print("test3")
@@ -33,7 +39,7 @@ def test_callback():
         tmp = a.y
         return a.x+a.y 
     
-    out = o.test_cb_with_struct(cb2)
+    out = o.test_cb_with_struct_fallible(cb2)
     assert tmp == 5, "test_cb_with_struct arg "
     assert out == 6, "test_cb_with_struct output"
 
@@ -51,19 +57,14 @@ def test_callback():
         return a+1
     
     print("DOING OK")
-    out = o.test_multiple_cb_args(cb3, cb4)
+    out = o.test_multiple_cb_args_fallible(cb3, cb4)
     assert tmp == 4, "test_multiple_cb_args arg "
     assert tmp2 == 5, "test_multiple_cb_args arg2 "
     assert out == 16, "test_multiple_cb_args output"
 
-    out = o.test_str_cb_arg(lambda a: len(a))
+    out = o.test_str_cb_arg_fallible(lambda a: len(a))
     assert out == 7, "test_str_cb_arg output"
     print("END")
-
-    op_ret = somelib.Opaque.from_str("Testing!")
-    def cb5():
-        return op_ret
-    assert o.test_opaque_result_error(cb5) == "\"Testing!\""
 
             
     cb = lambda a: 100 - a
@@ -102,14 +103,44 @@ def test_callback():
         return st
     op_holder = somelib.OpaqueCallbacks(cb_ctor, st)
 
-    assert somelib.OpaqueCallbacks.ret_op(cb_ctor, st).str == st.str
+    assert somelib.OpaqueCallbacks.ret_op_fallible(cb_ctor, st).str == st.str
 
-    assert op_holder.opaque_cb_mut_self(cb_ctor, st).str == st.str
-    assert op_holder.opaque_cb_self(cb_ctor, st).str == st.str
+    assert op_holder.opaque_cb_mut_self_fallible(cb_ctor, st).str == st.str
+    assert op_holder.opaque_cb_self_fallible(cb_ctor, st).str == st.str
 
     s = somelib.MyString("ABC123")
 
     def cb_op(st):
         st.str = "456"
-    somelib.CallbackWrapper.test_opaque_cb_arg(cb_op, s)
+    somelib.CallbackWrapper.test_opaque_cb_arg_fallible(cb_op, s)
     assert s.str == "456"
+
+    with pytest.raises(Exception) as e:
+        o.test_ffi_error(lambda: "Invalid type return")
+    last_error = somelib.get_last_ffi_error()
+    # Only test for Python >= 3.12, which is currently where we support tracebacks for FFI errors
+    if sys.hexversion >= 0x030c0000:
+        # Invalid return types are set manually, we need to verify the traceback exists:
+        assert hasattr(last_error, "__traceback__")
+        # Test that we actually have a correct traceback object:
+        assert last_error.__traceback__.tb_frame.f_code.co_qualname == "test_callback"
+
+    assert last_error.args[0] == "Unable to convert callback return type"
+    assert e.value.args[0] == somelib.FFIError.FFI
+    assert o.test_ffi_error(return_unit) == None
+
+    assert o.test_ffi_error_as_ok(lambda: "Invalid type return") == somelib.FFIError.FFI
+    assert o.test_ffi_error_as_ok(lambda: somelib.FFIError(somelib.FFIError.User)) == somelib.FFIError.User
+    assert o.test_ffi_error_as_ok(raise_exception) == somelib.FFIError.FFI
+    ffi_error = somelib.get_last_ffi_error()
+    assert type(ffi_error) == Exception
+    assert ffi_error.args[0] == "test"
+    if sys.hexversion >= 0x030c0000:
+        assert hasattr(last_error, "__traceback__")
+        assert last_error.__traceback__.tb_frame.f_code.co_qualname == "test_callback"
+
+def raise_exception():
+    raise Exception("test")
+
+def return_unit():
+    pass

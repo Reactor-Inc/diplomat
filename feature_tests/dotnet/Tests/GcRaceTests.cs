@@ -7,9 +7,11 @@ using Xunit;
 
 namespace Somelib.FeatureTests;
 
-// GC object-lifetime regression. Once a native call reads the receiver's
-// pointer the GC may finalize it (-> ~T() -> Destroy -> drop) mid-call — a
-// UAF that the generated GC.KeepAlive(this) prevents. See
+// GC object-lifetime regression. Once a native call has read the receiver's
+// pointer, nothing in the caller's frame keeps the wrapper alive; the operation
+// lease taken by the generated body must keep the RustHandle (and with it the
+// native value) reachable until the call returns. Without it the handle's
+// finalizer could run Destroy mid-call — a use-after-free. See
 // https://learn.microsoft.com/dotnet/standard/unsafe-code/best-practices
 //
 // Needs optimized IL so the JIT drops the receiver at last use; the csproj
@@ -19,7 +21,11 @@ public class GcRaceTests
 {
     // AggressiveOptimization: Tier1's precise liveness drops `probe` at its
     // last use (the race); Tier0 would root it and hide the bug.
-    [MethodImpl(MethodImplOptions.NoInlining | MethodImplOptions.AggressiveOptimization)]
+    [MethodImpl(MethodImplOptions.NoInlining
+#if !NETFRAMEWORK
+        | MethodImplOptions.AggressiveOptimization
+#endif
+    )]
     private static ulong UnrootedSlowCall(ulong millis)
     {
         GcRaceProbe probe = GcRaceProbe.Create();

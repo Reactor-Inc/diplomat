@@ -248,6 +248,24 @@ pub struct SelfParam {
     pub attrs: Attrs,
 }
 
+fn receiver_to_reference(
+    rec: &syn::Receiver,
+    module_location: &SpanLocation,
+) -> Option<(Lifetime, Mutability)> {
+    match &rec.kind {
+        syn::ReceiverKind::Reference(_, lt, mt) => {
+            Some((lt.spanned_into(module_location), Mutability::from_syn(mt)))
+        }
+        syn::ReceiverKind::Value => None,
+        _ => create_report(AstReport::new(
+            "Unsupported receiver".into(),
+            Some(rec.span().spanned_into(module_location)),
+            "Diplomat only supports `&[mut] self` references or `[mut] self` values.".into(),
+            vec![],
+        )),
+    }
+}
+
 impl SelfParam {
     pub fn to_typename(&self) -> TypeName {
         let typ = TypeName::Named(self.path_type.clone());
@@ -263,12 +281,7 @@ impl SelfParam {
         module_location: &SpanLocation,
     ) -> Self {
         SelfParam {
-            reference: rec.reference.as_ref().map(|(_, lt)| {
-                (
-                    lt.spanned_into(module_location),
-                    Mutability::from_syn(&rec.mutability),
-                )
-            }),
+            reference: receiver_to_reference(rec, module_location),
             path_type,
             attrs: Attrs::from_attrs(&rec.attrs, module_location),
         }
@@ -302,12 +315,7 @@ impl TraitSelfParam {
         module_location: &SpanLocation,
     ) -> Self {
         TraitSelfParam {
-            reference: rec.reference.as_ref().map(|(_, lt)| {
-                (
-                    lt.spanned_into(module_location),
-                    Mutability::from_syn(&rec.mutability),
-                )
-            }),
+            reference: receiver_to_reference(rec, module_location),
             path_trait,
         }
     }
@@ -328,11 +336,20 @@ pub struct Param {
 }
 
 impl Param {
-    /// Check if this parameter is a Write
+    /// Check if this parameter is a Write (`&mut DiplomatWrite` or `&mut DiplomatWriteGeneric<T>`)
     pub fn is_write(&self) -> bool {
+        self.write_type().is_some()
+    }
+
+    /// If this parameter is a Write, returns `Some(WriteType::Str)` for `DiplomatWrite` (strings)
+    /// or `Some(WriteType::Primitive(prim))` for `DiplomatWriteGeneric<T>`.
+    pub fn write_type(&self) -> Option<super::WriteType> {
         match self.ty {
-            TypeName::Reference(_, Mutability::Mutable, ref w) => **w == TypeName::Write,
-            _ => false,
+            TypeName::Reference(_, Mutability::Mutable, ref w) => match **w {
+                TypeName::Write(write_ty) => Some(write_ty),
+                _ => None,
+            },
+            _ => None,
         }
     }
 

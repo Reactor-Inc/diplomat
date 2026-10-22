@@ -36,6 +36,18 @@ def test_structs():
     bg.append(somelib.BigStructWithStuff(1, 2, 3, somelib.ScalarPairWithPadding(1, 2), 0))
     somelib.BigStructWithStuff.assert_slice(bg, 2)
 
+    ms = somelib.MyStructSlice()
+    ms.append(somelib.MyStruct())
+    s_d = somelib.MyStruct()
+    s_d.g = somelib.MyEnum.D
+    ms.append(s_d)
+    somelib.MyStruct.assert_slice(ms, somelib.MyEnum.D)
+
+    es = somelib.ContiguousEnumSlice()
+    es.append(somelib.ContiguousEnum.C)
+    es.append(somelib.ContiguousEnum.F)
+    somelib.MyStruct.assert_enum_slice(es, somelib.ContiguousEnum.F)
+
 def test_struct_holding_opaques():
     original_op = somelib.Opaque()
     op_st = somelib.StructOfOpaque(original_op, somelib.OpaqueMut())
@@ -75,3 +87,15 @@ def test_tuples():
 
     assert somelib.TupleStruct.takes_st_as_tuple((10, 0, somelib.MyStruct(), somelib.Opaque())) == 10
     assert somelib.TupleStruct.takes_st_as_tuple((10, 0, somelib.MyStruct(), somelib.Opaque()), 20) == 30
+
+def test_struct_char_constructor_none_defaults():
+    # A struct without `#[diplomat::attr(auto, constructor)]` gets an auto-generated
+    # positional constructor that marks every member `.none()` (see
+    # PrimitiveStruct_binding.cpp). `PrimitiveStruct.b` is a `char32_t`, so this
+    # exercises the char32_t caster through that constructor: a valid char must work,
+    # and None must default-initialize to '\0' (mirroring C struct zero-init) instead
+    # of crashing.
+    ps = somelib.PrimitiveStruct(1.0, True, U'餐', 0, 0, 0)
+    assert ps.b == U'餐'
+    ps = somelib.PrimitiveStruct(1.0, True, None, 0, 0, 0)
+    assert ps.b == U'\0'

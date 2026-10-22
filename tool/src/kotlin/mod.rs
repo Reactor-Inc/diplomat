@@ -19,6 +19,7 @@ use std::iter::once;
 mod formatter;
 use formatter::KotlinFormatter;
 
+use crate::filters;
 use crate::{Config, ErrorStore, FileMap};
 use serde::{Deserialize, Serialize};
 
@@ -51,6 +52,7 @@ pub(crate) fn attr_support() -> BackendAttrSupport {
     a.traits_are_sync = true;
     a.generate_mocking_interface = true;
     a.owned_slices = true;
+    a.utf16_writeables = true;
 
     a
 }
@@ -127,7 +129,7 @@ pub(crate) fn run<'tcx>(
 
     for (id, ty) in tcx.all_types() {
         ty_gen_cx.callback_params.clear(); // specific to each type in a file
-        let _guard = ty_gen_cx.errors.set_context_ty(ty.name().as_str().into());
+        let _guard = ty_gen_cx.errors.set_context_ty(ty.name_with_span().into());
         if ty.attrs().disable {
             continue;
         }
@@ -164,9 +166,7 @@ pub(crate) fn run<'tcx>(
 
     for (id, trt_def) in tcx.all_traits() {
         ty_gen_cx.callback_params.clear(); // specific to each type in a file
-        let _guard = ty_gen_cx
-            .errors
-            .set_context_ty(trt_def.name.as_str().into());
+        let _guard = ty_gen_cx.errors.set_context_ty((&trt_def.name).into());
         if trt_def.attrs.disable {
             continue;
         }
@@ -318,7 +318,7 @@ impl<'cx> ItemGenContext<'_, 'cx> {
     fn gen_infallible_return_type_name(&self, success_type: &SuccessType) -> Cow<'cx, str> {
         match success_type {
             SuccessType::Unit => self.formatter.fmt_void().into(),
-            SuccessType::Write => self.formatter.fmt_string().into(),
+            SuccessType::Write(..) => self.formatter.fmt_string().into(),
             SuccessType::OutType(ref o) => self.gen_type_name(o, None),
             _ => panic!("Unsupported success type"),
         }
@@ -461,15 +461,24 @@ impl<'cx> ItemGenContext<'_, 'cx> {
                 format!("{name}.fromCallback({real_param_name}).nativeStruct").into()
             }
             Type::DiplomatOption(ref inner) => {
-                // We pass false for is_params here the type is a struct field
-                let inner_expr =
-                    self.gen_kt_to_c_for_type(inner, "it".into(), struct_borrow_info, context);
                 let ffi_option = format!(
                     "Option{}",
                     self.formatter.fmt_struct_field_type_native(inner)
                 );
-                format!("{name}?.let {{ {ffi_option}.some({inner_expr}) }} ?: {ffi_option}.none()")
+                if is_param && matches!(**inner, Type::Slice(_)) {
+                    format!(
+                        "{name}SliceMemory?.let {{ {ffi_option}.some(it.slice) }} ?: {ffi_option}.none()"
+                    )
                     .into()
+                } else {
+                    // We pass false for is_params here the type is a struct field
+                    let inner_expr =
+                        self.gen_kt_to_c_for_type(inner, "it".into(), struct_borrow_info, context);
+                    format!(
+                        "{name}?.let {{ {ffi_option}.some({inner_expr}) }} ?: {ffi_option}.none()"
+                    )
+                    .into()
+                }
             }
             _ => todo!(),
         }
@@ -478,7 +487,7 @@ impl<'cx> ItemGenContext<'_, 'cx> {
     fn gen_infallible_return_type_ffi(&self, success: &SuccessType) -> Cow<'cx, str> {
         match success {
             SuccessType::Unit => self.formatter.fmt_void().into(),
-            SuccessType::Write => self.formatter.fmt_void().into(),
+            SuccessType::Write(..) => self.formatter.fmt_void().into(),
             SuccessType::OutType(ref o) => self.gen_type_name_ffi(o, None),
             _ => panic!("Unsupported success type"),
         }
@@ -537,7 +546,7 @@ impl<'cx> ItemGenContext<'_, 'cx> {
 
                 format!("Result{ok_type}{err_type}").into()
             }
-            ReturnType::Nullable(SuccessType::Unit | SuccessType::Write) => "OptionUnit".into(),
+            ReturnType::Nullable(SuccessType::Unit | SuccessType::Write(..)) => "OptionUnit".into(),
             ReturnType::Nullable(
                 ref success @ SuccessType::OutType(
                     Type::Struct(..) | Type::Enum(..) | Type::Primitive(..),
@@ -656,10 +665,15 @@ impl<'cx> ItemGenContext<'_, 'cx> {
             .expect("Failed to render opaque return block")
     }
 
-    fn write_return(return_type_modifier: &str) -> String {
+    fn write_return(write_type: &hir::WriteType, return_type_modifier: &str) -> String {
+        let fn_name = match write_type {
+            hir::WriteType::Str => "writeToString",
+            hir::WriteType::Str16 => "writeToString16",
+            _ => unreachable!("Unsupported WriteType"),
+        };
         format!(
             r#"
-val returnString = DW.writeToString(write)
+val returnString = DW.{fn_name}(write)
 return returnString{return_type_modifier}"#
         )
     }
@@ -879,7 +893,7 @@ val intermediateOption = {val_name}.option() ?: return null
         return_type_postfix: &str,
     ) -> String {
         match res {
-            SuccessType::Write => Self::write_return(return_type_postfix),
+            SuccessType::Write(ref w) => Self::write_return(w, return_type_postfix),
             SuccessType::OutType(ref o) => self.gen_out_type_return_conversion(
                 method,
                 method_lifetimes_map,
@@ -962,12 +976,12 @@ val intermediateOption = {val_name}.option() ?: return null
                 self.gen_nullable_return_conversion(method, method_lifetimes_map, "returnVal", res)
             }
 
-            ReturnType::Nullable(SuccessType::Write) => format!(
+            ReturnType::Nullable(SuccessType::Write(ref w)) => format!(
                 r#"
 returnVal.option() ?: return null
 {}
                         "#,
-                Self::write_return("")
+                Self::write_return(w, "")
             ),
             ReturnType::Nullable(SuccessType::Unit) => "return returnVal.option()".into(),
             _ => panic!("unsupported type"),
@@ -1034,7 +1048,7 @@ returnVal.option() ?: return null
         struct_name: Option<&str>,
         add_override_specifier_for_opaque_self_methods: bool,
     ) -> MethodInfo {
-        let _guard = self.errors.set_context_method(method.name.as_str().into());
+        let _guard = self.errors.set_context_method((&method.name).into());
         if method.attrs.disable {
             return MethodInfo::default();
         }
@@ -1098,8 +1112,9 @@ returnVal.option() ?: return null
 
             let param_borrow_kind = visitor.visit_param(&param.ty, &param_name);
 
-            match &param.ty {
+            match param.ty.unwrap_option() {
                 Type::Slice(slice) => {
+                    let is_option = param.ty.is_option();
                     let borrowed_lt = match param_borrow_kind {
                         ParamBorrowInfo::Struct(_) => None,
                         ParamBorrowInfo::TemporarySlice => {
@@ -1107,7 +1122,10 @@ returnVal.option() ?: return null
                                 // The GC should handle this, but explicit closing helps
                                 // This also ensures that fooSliceMemory is not prematurely cleaned up
                                 // (though the JVM never cleans up things before their stack frame is over)
-                                cleanups.push(format!("{param_name}SliceMemory.close()").into());
+                                let maybe_null = if is_option { "?" } else { "" };
+                                cleanups.push(
+                                    format!("{param_name}SliceMemory{maybe_null}.close()").into(),
+                                );
                             }
                             None
                         }
@@ -1123,16 +1141,25 @@ returnVal.option() ?: return null
                         ParamBorrowInfo::NotBorrowed => None,
                         _ => todo!(),
                     };
-                    slice_conversions.push((
-                        param_name.clone(),
+                    let slice_conv = if is_option {
+                        let inner_conv = self.gen_slice_conversion(
+                            true,
+                            "it",
+                            &method.lifetime_env,
+                            slice,
+                            borrowed_lt,
+                        );
+                        format!("{param_name}?.let {{ {inner_conv} }}").into()
+                    } else {
                         self.gen_slice_conversion(
                             true,
                             &param_name,
                             &method.lifetime_env,
                             slice,
                             borrowed_lt,
-                        ),
-                    ));
+                        )
+                    };
+                    slice_conversions.push((param_name.clone(), slice_conv));
                 }
                 Type::Callback(Callback {
                     param_self: _,
@@ -1265,9 +1292,9 @@ returnVal.option() ?: return null
         }
         let write_return = matches!(
             &method.output,
-            ReturnType::Infallible(SuccessType::Write)
-                | ReturnType::Fallible(SuccessType::Write, _)
-                | ReturnType::Nullable(SuccessType::Write)
+            ReturnType::Infallible(SuccessType::Write(..))
+                | ReturnType::Fallible(SuccessType::Write(..), _)
+                | ReturnType::Nullable(SuccessType::Write(..))
         );
         if write_return {
             param_conversions.push("write".into());
@@ -1360,7 +1387,7 @@ returnVal.option() ?: return null
             write_return,
             slice_conversions,
             cleanups: &cleanups,
-            docs: self.formatter.fmt_docs(&method.docs),
+            docs: self.formatter.fmt_docs(&method.docs, &method.attrs),
             add_override_specifier_for_opaque_self_methods,
             lifetimes: &method.lifetime_env,
             method_lifetimes_map,
@@ -1399,6 +1426,7 @@ returnVal.option() ?: return null
             let param_name = self.formatter.fmt_param_name(param.name.as_str());
 
             visitor.visit_param(&param.ty, &param_name);
+
             if let Type::Callback(_) = &param.ty {
                 additional_name = Some(
                     type_name.to_owned()
@@ -1415,9 +1443,9 @@ returnVal.option() ?: return null
                 self.gen_native_type_name(&param.ty, additional_name.clone()),
             ));
         }
-        if let ReturnType::Infallible(SuccessType::Write)
-        | ReturnType::Fallible(SuccessType::Write, _)
-        | ReturnType::Nullable(SuccessType::Write) = method.output
+        if let ReturnType::Infallible(SuccessType::Write(..))
+        | ReturnType::Fallible(SuccessType::Write(..), _)
+        | ReturnType::Nullable(SuccessType::Write(..)) = method.output
         {
             param_decls.push("write: Pointer".into())
         }
@@ -1527,7 +1555,7 @@ returnVal.option() ?: return null
                 special_methods: SpecialMethodsImpl::new(special_methods),
                 callback_params: self.callback_params.as_ref(),
                 use_finalizers_not_cleaners: self.use_finalizers_not_cleaners,
-                docs: self.formatter.fmt_docs(&ty.docs),
+                docs: self.formatter.fmt_docs(&ty.docs, &ty.attrs),
                 is_custom_error: ty.attrs.custom_errors,
                 generate_mocking_interface: (ty.attrs.generate_mocking_interface
                     && !self_methods.is_empty()),
@@ -1674,7 +1702,7 @@ returnVal.option() ?: return null
                         &field.ty,
                     ),
                     kt_to_native,
-                    docs: self.formatter.fmt_docs(&field.docs),
+                    docs: self.formatter.fmt_docs(&field.docs, &field.attrs),
                 }
             })
             .collect();
@@ -1696,7 +1724,7 @@ returnVal.option() ?: return null
                 native_methods: native_methods.as_ref(),
                 callback_params: self.callback_params.as_ref(),
                 lifetimes,
-                docs: self.formatter.fmt_docs(&ty.docs),
+                docs: self.formatter.fmt_docs(&ty.docs, &ty.attrs),
                 is_custom_error: ty.attrs.custom_errors,
                 is_out_struct: non_out_struct.is_none(),
             }
@@ -1814,7 +1842,9 @@ returnVal.option() ?: return null
             non_native_params_and_types,
             input_params: native_input_names.join(", "),
             docs: match &method.docs {
-                Some(method_docs) => self.formatter.fmt_docs(method_docs),
+                Some(method_docs) => self
+                    .formatter
+                    .fmt_docs(method_docs, &method.attrs.clone().unwrap_or_default()),
                 None => "".to_string(),
             },
         }
@@ -1863,7 +1893,7 @@ returnVal.option() ?: return null
                 trait_methods: trait_methods.as_ref(),
                 callback_params: self.callback_params.as_ref(),
                 trait_method_names: &trait_method_names.join(", "),
-                docs: self.formatter.fmt_docs(&trt.docs),
+                docs: self.formatter.fmt_docs(&trt.docs, &trt.attrs),
             }
             .render()
             .expect("Failed to render trait template"),
@@ -1998,7 +2028,7 @@ returnVal.option() ?: return null
             companion_methods: companion_methods.as_ref(),
             native_methods: native_methods.as_ref(),
             callback_params: self.callback_params.as_ref(),
-            docs: self.formatter.fmt_docs(&ty.docs),
+            docs: self.formatter.fmt_docs(&ty.docs, &ty.attrs),
             is_custom_error: ty.attrs.custom_errors,
         }
         .render()

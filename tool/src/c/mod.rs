@@ -46,6 +46,8 @@ pub(crate) fn attr_support() -> BackendAttrSupport {
     a.free_functions = true;
     a.mutable_slices = true;
     a.opaque_slices = true;
+    a.generic_writeables = true;
+    a.utf16_writeables = true;
 
     a
 }
@@ -74,7 +76,7 @@ pub(crate) fn run<'tcx>(
         let decl_header_path = formatter.fmt_decl_header_path(id.into());
         let impl_header_path = formatter.fmt_impl_header_path(id.into());
 
-        let _guard = errors.set_context_ty(ty.name().as_str().into());
+        let _guard = errors.set_context_ty(ty.name_with_span().into());
         let context = ItemGenContext {
             tcx,
             formatter: &formatter,
@@ -107,7 +109,7 @@ pub(crate) fn run<'tcx>(
         let decl_header_path = formatter.fmt_decl_header_path(id.into());
         let impl_header_path = formatter.fmt_impl_header_path(id.into());
 
-        let _guard = errors.set_context_ty(trt.name.as_str().into());
+        let _guard = errors.set_context_ty((&trt.name).into());
         let context = ItemGenContext {
             tcx,
             formatter: &formatter,
@@ -117,7 +119,7 @@ pub(crate) fn run<'tcx>(
             impl_header_path: &impl_header_path,
         };
 
-        let decl_header = context.gen_trait_def(id);
+        let (_, decl_header) = context.gen_trait_def(id);
         files.add_file(decl_header_path, decl_header.to_string());
     }
     // loop over traits too

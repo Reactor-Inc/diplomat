@@ -1,5 +1,6 @@
 #[diplomat::bridge]
 pub mod ffi {
+    use crate::result::ffi::ErrorEnum;
     use diplomat_runtime::{DiplomatStr, DiplomatStr16Slice, DiplomatStrSlice, DiplomatWrite};
     use std::fmt::Write as _;
 
@@ -54,7 +55,6 @@ pub mod ffi {
             let _ = write;
         }
 
-        #[diplomat::attr(dotnet, disable)]
         pub fn borrow<'a>(&'a self) -> DiplomatStrSlice<'a> {
             AsRef::<[u8]>::as_ref(&self.0).into()
         }
@@ -81,6 +81,7 @@ pub mod ffi {
     }
 
     #[diplomat::opaque_mut]
+    #[diplomat::attr(dotnet, manually_disposable)]
     #[derive(Debug)]
     pub struct Float64Vec(Vec<f64>);
 
@@ -167,11 +168,53 @@ pub mod ffi {
         pub fn get(&self, i: usize) -> Option<f64> {
             self.0.get(i).copied()
         }
+
+        #[diplomat::cfg(supports = generic_writeables)]
+        pub fn write_to(&self, w: &mut DiplomatWriteGeneric<f64>) {
+            w.write_slice(&self.0);
+        }
+
+        #[diplomat::cfg(supports = generic_writeables)]
+        pub fn write_multi(&self, w: &mut DiplomatWriteGeneric<f64>) {
+            for &x in &self.0 {
+                w.push(x);
+            }
+            w.extend(self.0.iter().map(|&x| x * 2.0));
+        }
+
+        #[diplomat::cfg(supports = generic_writeables)]
+        pub fn try_write_to(
+            &self,
+            should_succeed: bool,
+            w: &mut DiplomatWriteGeneric<f64>,
+        ) -> Result<(), ErrorEnum> {
+            if should_succeed {
+                w.write_slice(&self.0);
+                Ok(())
+            } else {
+                Err(ErrorEnum::Foo)
+            }
+        }
+
+        #[diplomat::cfg(supports = generic_writeables)]
+        pub fn maybe_write_to(
+            &self,
+            should_succeed: bool,
+            w: &mut DiplomatWriteGeneric<f64>,
+        ) -> Option<()> {
+            if should_succeed {
+                w.write_slice(&self.0);
+                Some(())
+            } else {
+                None
+            }
+        }
     }
 
     // Owned opaque returns borrowing a `&[u8]` param: on .NET the param becomes
     // ReadOnlyMemory<u8> pinned for the returned view's lifetime (PR #1201).
     #[diplomat::opaque]
+    #[diplomat::attr(dotnet, manually_disposable)]
     #[diplomat::attr(not(dotnet), disable)]
     pub struct OpaqueSliceView<'a>(&'a [u8]);
 
@@ -232,6 +275,25 @@ pub mod ffi {
         /// GC memory-pressure path.
         pub fn make_bytes(len: u32) -> Box<[u8]> {
             (0..len).map(|i| (i % 256) as u8).collect()
+        }
+
+        /// Fallible variant of [`Self::make_bytes`]: errors on `len == 0`.
+        /// Exercises the `Result<Box<[u8]>, E>` bridge shape.
+        pub fn try_make_bytes(len: u32) -> Result<Box<[u8]>, ErrorEnum> {
+            if len == 0 {
+                return Err(ErrorEnum::Foo);
+            }
+            Ok((0..len).map(|i| (i % 256) as u8).collect())
+        }
+
+        /// Optional variant of [`Self::make_bytes`]: `None` on `len == 0`.
+        /// Exercises the `Option<Box<[u8]>>` bridge shape.
+        pub fn maybe_make_bytes(len: u32) -> Option<Box<[u8]>> {
+            if len == 0 {
+                None
+            } else {
+                Some((0..len).map(|i| (i % 256) as u8).collect())
+            }
         }
     }
 

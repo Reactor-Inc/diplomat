@@ -1,0 +1,25 @@
+{%- let docs = property.docs() %}
+{%- include "dotnet/member_docs.cs.jinja" %}
+    public {{ property.property_type }} {{ property.name }}
+    {
+        {%- if let Some(method) = property.getter %}
+{%- let extra_indent = "    " %}
+        get
+        {
+            unsafe
+            {
+{%- include "dotnet/method_body.cs.jinja" %}
+            }
+        }
+        {%- endif %}
+        {%- if let Some(method) = property.setter %}
+{%- let extra_indent = "    " %}
+        set
+        {
+            unsafe
+            {
+{%- include "dotnet/method_body.cs.jinja" %}
+            }
+        }
+        {%- endif %}
+    }

@@ -13,6 +13,8 @@ use diplomat_core::hir::IncludeSource;
 use diplomat_core::hir::OpaqueId;
 use diplomat_core::hir::OpaquePath;
 use diplomat_core::hir::Slice;
+use diplomat_core::hir::TraitId;
+use diplomat_core::hir::TraitIdGetter;
 use diplomat_core::hir::{
     self, MaybeOwn, Mutability, OpaqueOwner, ReturnType, SelfType, StructPathLike, SuccessType,
     SymbolId, TyPosition, Type, TypeDef,
@@ -116,8 +118,9 @@ pub(crate) struct ItemGenContext<'ccx, 'tcx, 'header> {
     pub c: CItemGenContext<'ccx, 'tcx, 'header>,
     pub impl_header: &'header mut Header<'ccx>,
     pub decl_header: &'header mut Header<'ccx>,
-    /// Are we currently generating struct fields?
-    pub generating_struct_fields: bool,
+    /// For generating type names, do we need to include headers to grab additional ctypes info?
+    /// (Used for struct fields and trait definitions)
+    pub generate_definition_includes: bool,
 }
 
 impl<'ccx, 'tcx: 'ccx> ItemGenContext<'ccx, 'tcx, '_> {
@@ -189,9 +192,7 @@ impl<'ccx, 'tcx: 'ccx> ItemGenContext<'ccx, 'tcx, '_> {
         let c_header = self.c.gen_enum_def(id);
         let c_impl_header = self.c.gen_impl(id.into());
 
-        let _guard = self
-            .errors
-            .set_context_ty(self.c.tcx.fmt_symbol_name_diagnostics(id.into()));
+        let _guard = self.errors.set_context_ty((&ty.name).into());
 
         let methods = ty
             .methods
@@ -243,6 +244,7 @@ impl<'ccx, 'tcx: 'ccx> ItemGenContext<'ccx, 'tcx, '_> {
             deprecated: Option<&'a str>,
             default_variant: Cow<'a, str>,
             extra_def_code: ExtraCode,
+            is_sliceable: bool,
         }
 
         DeclTemplate {
@@ -258,6 +260,7 @@ impl<'ccx, 'tcx: 'ccx> ItemGenContext<'ccx, 'tcx, '_> {
             deprecated: ty.attrs.deprecated.as_deref(),
             default_variant,
             extra_def_code,
+            is_sliceable: ty.attrs.abi_compatible && ty.usage.sliced,
         }
         .render_into(self.decl_header)
         .unwrap();
@@ -384,13 +387,13 @@ impl<'ccx, 'tcx: 'ccx> ItemGenContext<'ccx, 'tcx, '_> {
         let is_in_mut_struct =
             def.attrs.mut_struct_ref || self.config.cpp_config.structs_always_mut_ref;
 
-        self.generating_struct_fields = true;
+        self.generate_definition_includes = true;
         let field_decls = def
             .fields
             .iter()
             .map(|field| self.gen_field_ty_decl(is_in_mut_struct, &field.ty, field.name.as_str()))
             .collect::<Vec<_>>();
-        self.generating_struct_fields = false;
+        self.generate_definition_includes = false;
 
         let cpp_to_c_fields = def
             .fields
@@ -493,6 +496,161 @@ impl<'ccx, 'tcx: 'ccx> ItemGenContext<'ccx, 'tcx, '_> {
         .unwrap();
     }
 
+    pub fn gen_trait_def(&mut self, id: TraitId) {
+        let trait_name = self.formatter.fmt_symbol_name(id.into());
+        let trait_name_unnamespaced = self.formatter.fmt_trait_name_unnamespaced(id);
+        let trait_def = self.c.tcx.resolve_trait(id);
+
+        struct TraitMethodInfo<'a> {
+            name: Cow<'a, str>,
+            return_type_name: Cow<'a, str>,
+            return_type: &'a ReturnType<hir::InputOnly>,
+            return_method_call: Option<String>,
+            params: Vec<NamedType<'a>>,
+            deprecated: Option<&'a str>,
+            c_ty: &'a crate::c::gen::CallbackInfo<'a>,
+        }
+
+        let (trait_info, c_header) = self.c.gen_trait_def(id);
+        self.generate_definition_includes = true;
+        let methods = trait_def
+            .methods
+            .iter()
+            .enumerate()
+            .map(|(idx, m)| {
+                let ret = self.gen_cpp_return_type_name(&m.output, false);
+                let return_method_call = match m.output.as_ref() {
+                    ReturnType::Infallible(i) if i.is_unit() => None,
+                    ReturnType::Infallible(..) => Some("replace_ret".to_string()),
+                    ReturnType::Fallible(ok, err) => {
+                        let ok_type_name = match ok {
+                            hir::SuccessType::Unit => "std::monostate".into(),
+                            hir::SuccessType::OutType(o) => self.gen_type_name(o),
+                            _ => unreachable!("unknown AST/HIR variant"),
+                        };
+                        let err_type_name = match err {
+                            Some(o) => self.gen_type_name(o),
+                            None => "std::monostate".into(),
+                        };
+                        Some(format!(
+                            "replace_result<{ok_type_name}, {err_type_name}, {}{}capi::{}>",
+                            self.formatter.lib_name_ns_prefix,
+                            if let Some(ns) = &trait_def.attrs.namespace {
+                                format!("{ns}::")
+                            } else {
+                                "".into()
+                            },
+                            trait_info.methods[idx].return_ty
+                        ))
+                    }
+                    ReturnType::Nullable(ref success) => {
+                        let type_name = match success {
+                            hir::SuccessType::Unit => "std::monostate".into(),
+                            hir::SuccessType::OutType(o) => self.gen_type_name(o),
+                            _ => unreachable!("unknown AST/HIR variant"),
+                        };
+                        Some(format!(
+                            "replace_optional_ret<{}{}capi::{}, {type_name}>",
+                            self.formatter.lib_name_ns_prefix,
+                            if let Some(ns) = &trait_def.attrs.namespace {
+                                format!("{ns}::")
+                            } else {
+                                "".into()
+                            },
+                            trait_info.methods[idx].return_ty
+                        ))
+                    }
+                };
+                let params = m
+                    .params
+                    .iter()
+                    .map(|p| {
+                        NamedType {
+                            var_name: p
+                                .name
+                                .as_ref()
+                                .expect("Found unnamed parameter in trait")
+                                .as_str()
+                                .into(),
+                            type_name: self.gen_type_name(&p.ty),
+                            default_value: None,
+                            // TODO:
+                            lifetimebound: false,
+                        }
+                    })
+                    .collect::<Vec<_>>();
+
+                TraitMethodInfo {
+                    name: m
+                        .name
+                        .as_ref()
+                        .expect("Could not get trait method name")
+                        .as_str()
+                        .into(),
+                    return_type_name: ret,
+                    return_type: &m.output,
+                    return_method_call,
+                    params,
+                    deprecated: m.attrs.as_ref().and_then(|a| a.deprecated.as_deref()),
+                    // Methods are in the same order, so this should be correrct:
+                    c_ty: &trait_info.methods[idx],
+                }
+            })
+            .collect::<Vec<_>>();
+
+        let ctype = self.formatter.fmt_c_trait_name(id);
+
+        #[derive(Template)]
+        #[template(path = "cpp/trait_decl.h.jinja", escape = "none")]
+        struct DeclTemplate<'a> {
+            fmt: &'a Cpp2Formatter<'a>,
+            ctype: Cow<'a, str>,
+            c_header: C2Header,
+            trait_name: &'a str,
+            trait_name_unnamespaced: &'a str,
+            namespace: Option<&'a str>,
+            methods: &'a [TraitMethodInfo<'a>],
+            docs: &'a str,
+            deprecated: Option<&'a str>,
+        }
+
+        DeclTemplate {
+            fmt: self.formatter,
+            c_header,
+            ctype: ctype.clone(),
+            trait_name: &trait_name,
+            trait_name_unnamespaced: &trait_name_unnamespaced,
+            namespace: trait_def.attrs.namespace.as_deref(),
+            methods: methods.as_slice(),
+            docs: &self.formatter.fmt_docs(&trait_def.docs, &trait_def.attrs),
+            deprecated: trait_def.attrs.deprecated.as_deref(),
+        }
+        .render_into(self.decl_header)
+        .unwrap();
+
+        #[derive(Template)]
+        #[template(path = "cpp/trait_impl.h.jinja", escape = "none")]
+        struct ImplTemplate<'a> {
+            fmt: &'a Cpp2Formatter<'a>,
+            trait_name: &'a str,
+            trait_name_unnamespaced: &'a str,
+            namespace: Option<&'a str>,
+            ctype: Cow<'a, str>,
+            methods: &'a [TraitMethodInfo<'a>],
+        }
+
+        ImplTemplate {
+            fmt: self.formatter,
+            trait_name: &trait_name,
+            trait_name_unnamespaced: &trait_name_unnamespaced,
+            namespace: trait_def.attrs.namespace.as_deref(),
+            ctype,
+            methods: methods.as_slice(),
+        }
+        .render_into(self.impl_header)
+        .unwrap();
+    }
+
     pub fn gen_method_info(
         &mut self,
         id: SymbolId,
@@ -504,7 +662,7 @@ impl<'ccx, 'tcx: 'ccx> ItemGenContext<'ccx, 'tcx, '_> {
         let lib_name_ns_prefix = &self.formatter.lib_name_ns_prefix;
         let _guard = self
             .errors
-            .set_context_method(method.name.to_string().into());
+            .set_context_method(Cow::Owned(method.name.clone()));
         let method_name = self.formatter.fmt_method_name(method);
         let abi_name = self
             .formatter
@@ -813,28 +971,7 @@ impl<'ccx, 'tcx: 'ccx> ItemGenContext<'ccx, 'tcx, '_> {
             Type::Primitive(prim) => self.formatter.fmt_primitive_as_c(prim),
             Type::Opaque(ref op) => self.gen_opaque_name::<P>(op, false),
             Type::Struct(ref st) => self.gen_struct_name::<P>(st),
-            Type::Enum(ref e) => {
-                let id = e.tcx_id.into();
-                let type_name = self.formatter.fmt_type_name(id);
-                let type_name_unnamespaced = self.formatter.fmt_type_name_unnamespaced(id);
-                let def = self.c.tcx.resolve_type(id);
-                if def.attrs().disable {
-                    self.errors
-                        .push_error(format!("Found usage of disabled type {type_name}"))
-                }
-
-                self.decl_header
-                    .append_forward(def, &type_name_unnamespaced);
-                if self.generating_struct_fields {
-                    self.decl_header
-                        .includes
-                        .insert(self.formatter.fmt_decl_header_path(id.into()));
-                }
-                self.impl_header
-                    .includes
-                    .insert(self.formatter.fmt_impl_header_path(id.into()));
-                type_name
-            }
+            Type::Enum(ref e) => self.gen_enum_name(e),
             Type::Slice(hir::Slice::Str(_, encoding)) => self.formatter.fmt_borrowed_str(encoding),
             Type::Slice(hir::Slice::Primitive(b, p)) => {
                 let ret = self.formatter.fmt_primitive_as_c(p);
@@ -851,6 +988,11 @@ impl<'ccx, 'tcx: 'ccx> ItemGenContext<'ccx, 'tcx, '_> {
                 let ret = self.formatter.fmt_borrowed_slice(&st_name, b.mutability());
                 ret.into_owned().into()
             }
+            Type::Slice(hir::Slice::Enum(b, ref enm_ty)) => {
+                let enm_name = self.gen_enum_name(enm_ty);
+                let ret = self.formatter.fmt_borrowed_slice(&enm_name, b.mutability());
+                ret.into_owned().into()
+            }
             Type::Slice(hir::Slice::Opaque(b, ref op_ty)) => {
                 // Treat the inner type as mutable, we'll handle adding `const` directives in a second:
                 let type_name = self.gen_opaque_name::<hir::Everywhere>(op_ty, true);
@@ -863,8 +1005,46 @@ impl<'ccx, 'tcx: 'ccx> ItemGenContext<'ccx, 'tcx, '_> {
             Type::DiplomatOption(ref inner) => {
                 format!("std::optional<{}>", self.gen_type_name(inner)).into()
             }
+            Type::ImplTrait(ref tr) => {
+                let id = tr.id();
+                self.impl_header
+                    .includes
+                    .insert(self.formatter.fmt_impl_header_path(id.into()));
+                self.decl_header
+                    .includes
+                    .insert(self.formatter.fmt_decl_header_path(id.into()));
+                // We require a pointer for polymorphism, and it's unique because we expect to own the value.
+                format!(
+                    "std::unique_ptr<{}>",
+                    self.formatter.fmt_symbol_name(id.into())
+                )
+                .into()
+            }
             _ => unreachable!("unknown AST/HIR variant"),
         }
+    }
+
+    fn gen_enum_name(&mut self, e: &hir::EnumPath) -> Cow<'ccx, str> {
+        let id = e.tcx_id.into();
+        let type_name = self.formatter.fmt_type_name(id);
+        let type_name_unnamespaced = self.formatter.fmt_type_name_unnamespaced(id);
+        let def = self.c.tcx.resolve_type(id);
+        if def.attrs().disable {
+            self.errors
+                .push_error(format!("Found usage of disabled type {type_name}"))
+        }
+
+        self.decl_header
+            .append_forward(def, &type_name_unnamespaced);
+        if self.generate_definition_includes {
+            self.decl_header
+                .includes
+                .insert(self.formatter.fmt_decl_header_path(id.into()));
+        }
+        self.impl_header
+            .includes
+            .insert(self.formatter.fmt_impl_header_path(id.into()));
+        type_name
     }
 
     fn gen_struct_name<P: TyPosition>(&mut self, st: &P::StructPath) -> Cow<'ccx, str> {
@@ -880,7 +1060,7 @@ impl<'ccx, 'tcx: 'ccx> ItemGenContext<'ccx, 'tcx, '_> {
 
         self.decl_header
             .append_forward(def, &type_name_unnamespaced);
-        if self.generating_struct_fields {
+        if self.generate_definition_includes {
             self.decl_header
                 .includes
                 .insert(self.formatter.fmt_decl_header_path(id.into()));
@@ -922,7 +1102,7 @@ impl<'ccx, 'tcx: 'ccx> ItemGenContext<'ccx, 'tcx, '_> {
             let mutability = borrow.mutability;
             match (borrow.is_owned(), false) {
                 // unique_ptr is nullable
-                (true, _) => self.formatter.fmt_owned(&type_name),
+                (true, op) => self.formatter.fmt_owned(&type_name, op),
                 (false, true) => self.formatter.fmt_optional_borrowed(&type_name, mutability),
                 (false, false) => self.formatter.fmt_borrowed(&type_name, mutability),
             }
@@ -950,7 +1130,7 @@ impl<'ccx, 'tcx: 'ccx> ItemGenContext<'ccx, 'tcx, '_> {
         let mutability = op.owner.mutability().unwrap_or(hir::Mutability::Mutable);
         let ret = match (op.owner.is_owned(), op.is_optional()) {
             // unique_ptr is nullable
-            (true, _) => self.formatter.fmt_owned(&type_name),
+            (true, op) => self.formatter.fmt_owned(&type_name, op),
             (false, true) if !use_mt_ptr => {
                 self.formatter.fmt_optional_borrowed(&type_name, mutability)
             }
@@ -1130,6 +1310,21 @@ impl<'ccx, 'tcx: 'ccx> ItemGenContext<'ccx, 'tcx, '_> {
                 )
                 .into()
             }
+            Type::Slice(Slice::Enum(b, ref enm)) => {
+                let mutability = if b.mutability().is_mutable() {
+                    ""
+                } else {
+                    "const "
+                };
+                let id: hir::TypeId = enm.tcx_id.into();
+                let c_name = self
+                    .formatter
+                    .namespace_c_name(id.into(), &self.formatter.fmt_type_name_unnamespaced(id));
+                format!(
+                    "{{reinterpret_cast<{mutability}{c_name}*>({cpp_name}.data()), {cpp_name}.size()}}",
+                )
+                .into()
+            }
             Type::Slice(Slice::Opaque(b, ref op)) => format!(
                 "{{reinterpret_cast<{}{}**>({cpp_name}.data()), {cpp_name}.size()}}",
                 if b.mutability().is_mutable() {
@@ -1216,6 +1411,7 @@ impl<'ccx, 'tcx: 'ccx> ItemGenContext<'ccx, 'tcx, '_> {
                 };
                 format!("{{new decltype({cpp_name})(std::move({cpp_name})), {run_callback}, {lib_name_ns_prefix}diplomat::fn_traits({cpp_name}).c_delete}}",).into()
             }
+            Type::ImplTrait(..) => format!("{cpp_name}.release()->AsFFI()").into(),
             _ => unreachable!("unknown AST/HIR variant"),
         }
     }
@@ -1224,7 +1420,7 @@ impl<'ccx, 'tcx: 'ccx> ItemGenContext<'ccx, 'tcx, '_> {
     ///
     /// is_generic_write is whether we are generating the method that returns a string or
     /// operates on a Writeable
-    pub(super) fn gen_cpp_return_type_name<P: hir::TyPosition>(
+    pub(crate) fn gen_cpp_return_type_name<P: hir::TyPosition>(
         &mut self,
         result_ty: &ReturnType<P>,
         is_generic_write: bool,
@@ -1232,13 +1428,15 @@ impl<'ccx, 'tcx: 'ccx> ItemGenContext<'ccx, 'tcx, '_> {
         let lib_name_ns_prefix = &self.formatter.lib_name_ns_prefix;
         match *result_ty {
             ReturnType::Infallible(SuccessType::Unit) => "void".into(),
-            ReturnType::Infallible(SuccessType::Write) if is_generic_write => "void".into(),
-            ReturnType::Infallible(SuccessType::Write) => self.formatter.fmt_owned_str(),
+            ReturnType::Infallible(SuccessType::Write(..)) if is_generic_write => "void".into(),
+            ReturnType::Infallible(SuccessType::Write(prim)) => {
+                self.formatter.fmt_write_success_type(prim)
+            }
             ReturnType::Infallible(SuccessType::OutType(ref o)) => self.gen_type_name(o),
             ReturnType::Fallible(ref ok, ref err) => {
                 let ok_type_name = match ok {
-                    SuccessType::Write if is_generic_write => "std::monostate".into(),
-                    SuccessType::Write => self.formatter.fmt_owned_str(),
+                    SuccessType::Write(..) if is_generic_write => "std::monostate".into(),
+                    SuccessType::Write(prim) => self.formatter.fmt_write_success_type(*prim),
                     SuccessType::Unit => "std::monostate".into(),
                     SuccessType::OutType(o) => self.gen_type_name(o),
                     _ => unreachable!("unknown AST/HIR variant"),
@@ -1252,8 +1450,8 @@ impl<'ccx, 'tcx: 'ccx> ItemGenContext<'ccx, 'tcx, '_> {
             }
             ReturnType::Nullable(ref ty) => {
                 let type_name = match ty {
-                    SuccessType::Write if is_generic_write => "std::monostate".into(),
-                    SuccessType::Write => self.formatter.fmt_owned_str(),
+                    SuccessType::Write(..) if is_generic_write => "std::monostate".into(),
+                    SuccessType::Write(prim) => self.formatter.fmt_write_success_type(*prim),
                     SuccessType::Unit => "std::monostate".into(),
                     SuccessType::OutType(o) => self.gen_type_name(o),
                     _ => unreachable!("unknown AST/HIR variant"),
@@ -1379,6 +1577,16 @@ impl<'ccx, 'tcx: 'ccx> ItemGenContext<'ccx, 'tcx, '_> {
                 )
                 .into()
             }
+            Type::Slice(hir::Slice::Enum(b, ref enm_ty)) => {
+                let mt = b.mutability();
+                let enm_name = self.formatter.fmt_type_name(enm_ty.tcx_id.into());
+                let span = self.formatter.fmt_borrowed_slice(&enm_name, mt);
+                format!(
+                    "{span}(reinterpret_cast<{}{enm_name}*>({var_name}.data), {var_name}.len)",
+                    if mt.is_mutable() { "" } else { "const " }
+                )
+                .into()
+            }
             Type::DiplomatOption(ref inner) => {
                 let conversion = self.gen_c_to_cpp_for_type(inner, format!("{var_name}.ok").into());
                 format!("{var_name}.is_ok ? std::optional({conversion}) : std::nullopt").into()
@@ -1399,15 +1607,15 @@ impl<'ccx, 'tcx: 'ccx> ItemGenContext<'ccx, 'tcx, '_> {
         let lib_name_ns_prefix = &self.formatter.lib_name_ns_prefix;
         match *result_ty {
             ReturnType::Infallible(SuccessType::Unit) => None,
-            ReturnType::Infallible(SuccessType::Write) if is_generic_write => None,
-            ReturnType::Infallible(SuccessType::Write) => Some("std::move(output)".into()),
+            ReturnType::Infallible(SuccessType::Write(..)) if is_generic_write => None,
+            ReturnType::Infallible(SuccessType::Write(..)) => Some("std::move(output)".into()),
             ReturnType::Infallible(SuccessType::OutType(ref out_ty)) => {
                 Some(self.gen_c_to_cpp_for_type(out_ty, var_name))
             }
             ReturnType::Fallible(ref ok, ref err) => {
                 let ok_type_name = match ok {
-                    SuccessType::Write if is_generic_write => "std::monostate".into(),
-                    SuccessType::Write => self.formatter.fmt_owned_str(),
+                    SuccessType::Write(..) if is_generic_write => "std::monostate".into(),
+                    SuccessType::Write(prim) => self.formatter.fmt_write_success_type(*prim),
                     SuccessType::Unit => "std::monostate".into(),
                     SuccessType::OutType(ref o) => self.gen_type_name(o),
                     _ => unreachable!("unknown AST/HIR variant"),
@@ -1417,9 +1625,9 @@ impl<'ccx, 'tcx: 'ccx> ItemGenContext<'ccx, 'tcx, '_> {
                     None => "std::monostate".into(),
                 };
                 let ok_conversion = match ok {
-                    SuccessType::Write if is_generic_write => "".into(),
-                    // Note: the `output` variable is a string initialized in the template
-                    SuccessType::Write => "std::move(output)".into(),
+                    SuccessType::Write(..) if is_generic_write => "".into(),
+                    // Note: the `output` variable is a string/vector initialized in the template
+                    SuccessType::Write(..) => "std::move(output)".into(),
                     SuccessType::Unit => "".into(),
                     SuccessType::OutType(ref o) => {
                         self.gen_c_to_cpp_for_type(o, format!("{var_name}.ok").into())
@@ -1436,17 +1644,17 @@ impl<'ccx, 'tcx: 'ccx> ItemGenContext<'ccx, 'tcx, '_> {
             }
             ReturnType::Nullable(ref ty) => {
                 let type_name = match ty {
-                    SuccessType::Write if is_generic_write => "std::monostate".into(),
-                    SuccessType::Write => self.formatter.fmt_owned_str(),
+                    SuccessType::Write(..) if is_generic_write => "std::monostate".into(),
+                    SuccessType::Write(prim) => self.formatter.fmt_write_success_type(*prim),
                     SuccessType::Unit => "std::monostate".into(),
                     SuccessType::OutType(o) => self.gen_type_name(o),
                     _ => unreachable!("unknown AST/HIR variant"),
                 };
 
                 let conversion = match ty {
-                    SuccessType::Write if is_generic_write => "".into(),
-                    // Note: the `output` variable is a string initialized in the template
-                    SuccessType::Write => "std::move(output)".into(),
+                    SuccessType::Write(..) if is_generic_write => "".into(),
+                    // Note: the `output` variable is a string/vector initialized in the template
+                    SuccessType::Write(..) => "std::move(output)".into(),
                     SuccessType::Unit => "".into(),
                     SuccessType::OutType(ref o) => {
                         self.gen_c_to_cpp_for_type(o, format!("{var_name}.ok").into())

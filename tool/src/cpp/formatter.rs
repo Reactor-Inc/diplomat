@@ -2,7 +2,7 @@
 
 use crate::c::{CFormatter, CAPI_NAMESPACE};
 use diplomat_core::hir::{
-    self, DocsUrlGenerator, SpecialMethod, StringEncoding, SymbolId, TypeContext, TypeId,
+    self, DocsUrlGenerator, SpecialMethod, StringEncoding, SymbolId, TraitId, TypeContext, TypeId,
 };
 use std::{borrow::Cow, fmt::Write};
 
@@ -49,6 +49,12 @@ impl<'tcx> Cpp2Formatter<'tcx> {
             .apply(resolved.name().as_str().into())
     }
 
+    pub fn fmt_trait_name_unnamespaced(&self, id: TraitId) -> Cow<'tcx, str> {
+        let resolved = self.c.tcx().resolve_trait(id);
+
+        resolved.attrs.rename.apply(resolved.name.as_str().into())
+    }
+
     pub fn fmt_symbol_name(&self, id: SymbolId) -> Cow<'tcx, str> {
         match id {
             SymbolId::TypeId(ty) => self.fmt_type_name(ty),
@@ -59,6 +65,16 @@ impl<'tcx> Cpp2Formatter<'tcx> {
                     format!("{ns}::{name}").into()
                 } else {
                     name
+                }
+            }
+            SymbolId::TraitId(tr) => {
+                let resolved = self.c.tcx().resolve_trait(tr);
+                let name = self.fmt_trait_name_unnamespaced(tr);
+                let lib_prefix = &self.lib_name_ns_prefix;
+                if let Some(ns) = &resolved.attrs.namespace {
+                    format!("{lib_prefix}{ns}::{name}").into()
+                } else {
+                    format!("{lib_prefix}{name}").into()
                 }
             }
             _ => panic!("Unsupported SymbolId: {id:?}"),
@@ -91,6 +107,11 @@ impl<'tcx> Cpp2Formatter<'tcx> {
                     .apply(resolved.name().as_str().into());
                 (type_name.to_string(), resolved.attrs().namespace.clone())
             }
+            SymbolId::TraitId(tr) => {
+                let resolved = self.c.tcx().resolve_trait(tr);
+                let trait_name = resolved.attrs.rename.apply(resolved.name.as_str().into());
+                (trait_name.to_string(), resolved.attrs.namespace.clone())
+            }
             _ => panic!("Unsupported SymbolId {id:?}"),
         };
 
@@ -112,6 +133,11 @@ impl<'tcx> Cpp2Formatter<'tcx> {
                     .rename
                     .apply(resolved.name().as_str().into());
                 (type_name.to_string(), resolved.attrs().namespace.clone())
+            }
+            SymbolId::TraitId(tr) => {
+                let resolved = self.c.tcx().resolve_trait(tr);
+                let trait_name = resolved.attrs.rename.apply(resolved.name.as_str().into());
+                (trait_name.to_string(), resolved.attrs.namespace.clone())
             }
             _ => panic!("Unsupported SymbolId {id:?}"),
         };
@@ -157,6 +183,15 @@ impl<'tcx> Cpp2Formatter<'tcx> {
         self.c.fmt_type_name_maybe_namespaced(id.into())
     }
 
+    pub fn fmt_c_trait_name(&self, id: TraitId) -> Cow<'tcx, str> {
+        let trt_name_unnamespaced = self.c.fmt_trait_name(id);
+        let res = self.c.tcx().resolve_trait(id);
+        self.c.diplomat_namespace_for_custom_type(
+            format!("DiplomatTraitStruct_{}", trt_name_unnamespaced).into(),
+            res.attrs.namespace.as_deref(),
+        )
+    }
+
     pub fn fmt_c_ptr<'a>(&self, ident: &'a str, mutability: hir::Mutability) -> Cow<'a, str> {
         self.c.fmt_ptr(ident, mutability)
     }
@@ -183,11 +218,25 @@ impl<'tcx> Cpp2Formatter<'tcx> {
         ident: &'a str,
         mutability: hir::Mutability,
     ) -> Cow<'a, str> {
-        self.c.fmt_ptr(ident, mutability)
+        format!(
+            "{}diplomat::maybe_null<{}>",
+            self.lib_name_ns_prefix,
+            self.c.fmt_ptr(ident, mutability)
+        )
+        .into()
     }
 
-    pub fn fmt_owned<'a>(&self, ident: &'a str) -> Cow<'a, str> {
-        format!("std::unique_ptr<{ident}>").into()
+    pub fn fmt_owned<'a>(&self, ident: &'a str, optional: bool) -> Cow<'a, str> {
+        format!(
+            "{}std::unique_ptr<{ident}>{}",
+            if optional {
+                format!("{}diplomat::maybe_null<", self.lib_name_ns_prefix)
+            } else {
+                "".into()
+            },
+            if optional { ">" } else { "" }
+        )
+        .into()
     }
 
     pub fn fmt_borrowed_slice<'a>(
@@ -229,6 +278,21 @@ impl<'tcx> Cpp2Formatter<'tcx> {
         "std::string".into()
     }
 
+    pub fn fmt_owned_str16(&self) -> Cow<'static, str> {
+        "std::u16string".into()
+    }
+
+    pub fn fmt_write_success_type(&self, write_ty: hir::WriteType) -> Cow<'static, str> {
+        match write_ty {
+            hir::WriteType::Str => self.fmt_owned_str(),
+            hir::WriteType::Str16 => self.fmt_owned_str16(),
+            hir::WriteType::Primitive(prim) => {
+                format!("std::vector<{}>", self.fmt_primitive_as_c(prim)).into()
+            }
+            _ => unreachable!("unknown WriteType variant"),
+        }
+    }
+
     pub fn fmt_docs(&self, docs: &hir::Docs, attrs: &hir::Attrs) -> String {
         let mut docs = self.c.fmt_docs(docs);
         if let Some(deprecated) = attrs.deprecated.as_ref() {
@@ -237,6 +301,14 @@ impl<'tcx> Cpp2Formatter<'tcx> {
                 docs.push('\n');
             }
             let _ = writeln!(&mut docs, "\\deprecated {deprecated}");
+        }
+        if attrs.unstable {
+            if !docs.is_empty() {
+                docs.push('\n');
+                docs.push('\n');
+            }
+            docs.push_str("🚧 This API is unstable and may experience breaking changes outside major releases.");
+            docs.push('\n');
         }
         docs
     }
@@ -352,8 +424,8 @@ pub mod test {
         ) {
             Ok(context) => context,
             Err(e) => {
-                for (_cx, err) in e {
-                    eprintln!("Lowering error: {err}");
+                for err in e {
+                    eprintln!("{err}");
                 }
                 panic!("Failed to create context")
             }

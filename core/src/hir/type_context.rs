@@ -10,7 +10,7 @@ use crate::ast::attrs::AttrInheritContext;
 use crate::ast::SpanLocation;
 #[allow(unused_imports)] // use in docs links
 use crate::hir;
-use crate::hir::ParamSelf;
+use crate::hir::{CallbackInstantiationFunctionality, ParamSelf};
 use crate::{ast, Env};
 use core::fmt::{self, Display};
 use smallvec::SmallVec;
@@ -224,8 +224,8 @@ impl TypeContext {
     ) -> Result<Self, Vec<ErrorAndContext>> {
         let types = ast::File::from_syn(s, include_info, entry_location).all_types();
         let (mut ctx, hir) = Self::from_ast_without_validation(&types, cfg, attr_validator)?;
-        ctx.errors.set_item("(validation)");
-        hir.validate(&mut ctx.errors);
+        ctx.errors.set_item("(validation)", &None);
+        hir.validate(&mut ctx);
         if !ctx.errors.is_empty() {
             return Err(ctx.errors.take_errors());
         }
@@ -247,22 +247,41 @@ impl TypeContext {
 
         let mut errors = ErrorStore::default();
 
+        // Sort modules such that children come after their parents in the list
+        let mut modules = env.iter_modules().collect::<Vec<_>>();
+        modules.sort_by_key(|(p, ..)| p.elements.len());
+
+        let mut module_attrs: HashMap<&[ast::Ident], Attrs> = HashMap::new();
+
         for (path, mod_env) in env.iter_modules() {
+            let opt = path.elements.last().and_then(|m| m.span());
             errors.set_item(
                 path.elements
                     .last()
                     .map(|m| m.as_str())
                     .unwrap_or("root module"),
+                &opt,
             );
             let mod_attrs = Attrs::from_ast(
                 &mod_env.attrs,
                 &attr_validator,
-                &Default::default(),
+                module_attrs
+                    .get(
+                        &path
+                            .elements
+                            .split_last()
+                            .map(|(_, r)| r)
+                            .unwrap_or_default(),
+                    )
+                    .cloned()
+                    .unwrap_or_default(),
                 &mut errors,
             );
             let ty_attrs = mod_attrs.for_inheritance(AttrInheritContext::Type);
             let method_attrs =
                 mod_attrs.for_inheritance(AttrInheritContext::MethodOrImplFromModule);
+
+            module_attrs.insert(&path.elements, mod_attrs);
 
             for sym in mod_env.items() {
                 match sym {
@@ -416,15 +435,15 @@ impl TypeContext {
     ///
     /// Currently validates that methods are not inheriting any transitive bounds from parameters
     ///    Todo: Automatically insert these bounds during HIR construction in a second phase
-    fn validate<'hir>(&'hir self, errors: &mut ErrorStore<'hir>) {
+    fn validate<'hir>(&'hir self, ctx: &mut LoweringContext<'hir>) {
         // Lifetime validity check
         for (_id, ty) in self.all_types() {
-            errors.set_item(ty.name().as_str());
+            ctx.errors.set_item(ty.name().as_str(), ty.span());
 
-            self.validate_type_def(errors, ty);
+            self.validate_type_def(ctx, ty);
 
             for method in ty.methods() {
-                errors.set_subitem(method.name.as_str());
+                ctx.errors.set_subitem(method.name.as_str(), &method.name);
 
                 // This check must occur before validate_ty_in_method is called
                 // since validate_ty_in_method calls link_lifetimes which does not
@@ -434,7 +453,7 @@ impl TypeContext {
                     for lt in out_ty.lifetimes() {
                         if let MaybeStatic::NonStatic(lt) = lt {
                             if method.lifetime_env.get_bounds(lt).is_none() {
-                                errors.push(LoweringError::Other(
+                                ctx.errors.push(LoweringError::Other(
                                     "Found elided lifetime in return type, please explicitly specify".into(),
                                 ));
 
@@ -460,7 +479,7 @@ impl TypeContext {
                             }
                         }
                     }
-                    self.validate_self_ty_in_method(errors, s);
+                    self.validate_self_ty_in_method(&mut ctx.errors, s);
                 }
 
                 for param in &method.params {
@@ -473,7 +492,7 @@ impl TypeContext {
                     }
 
                     self.validate_ty_in_method(
-                        errors,
+                        ctx,
                         Param::Input(param.name.as_str()),
                         &param.ty,
                         method,
@@ -483,7 +502,7 @@ impl TypeContext {
                 let lts = method.output.used_method_lifetimes();
                 let mut intersection = lts.intersection(&struct_ref_lifetimes).peekable();
                 if intersection.peek().is_some() {
-                    errors.push(LoweringError::Other(
+                    ctx.errors.push(LoweringError::Other(
                         format!("Found lifetimes used in struct references also used in the return type: {}", intersection.map(|lt| {
                             format!("'{} ", method.lifetime_env.fmt_lifetime(lt))
                         }).collect::<String>())
@@ -491,35 +510,72 @@ impl TypeContext {
                 }
 
                 method.output.with_contained_types(|out_ty| {
-                    self.validate_ty_in_method(errors, Param::Return, out_ty, method);
+                    self.validate_ty_in_method(ctx, Param::Return, out_ty, method);
                 })
             }
         }
 
         for (_id, def) in self.all_traits() {
-            errors.set_item(def.name.as_str());
-            self.validate_trait(errors, def);
+            ctx.errors.set_item(def.name.as_str(), &def.name);
+            for m in &def.methods {
+                let ident = m.name.as_ref().expect("Trait methods must have names");
+                ctx.errors.set_subitem(ident.as_str(), ident);
+                for p in &m.params {
+                    self.validate_ty(ctx, &p.ty);
+                }
+                self.validate_callback_ret(&m.output, ctx);
+
+                let success = match &*m.output {
+                    hir::ReturnType::Infallible(success) | hir::ReturnType::Nullable(success) => {
+                        success
+                    }
+                    hir::ReturnType::Fallible(success, fallible) => {
+                        if let Some(f) = fallible {
+                            self.validate_ty(ctx, f);
+                        }
+                        success
+                    }
+                };
+
+                if let hir::SuccessType::OutType(o) = success {
+                    self.validate_ty(ctx, o);
+                }
+            }
+        }
+
+        for (_id, f) in self.all_free_functions() {
+            ctx.errors.set_item(f.name.as_str(), &f.name);
+            for p in &f.params {
+                self.validate_ty(ctx, &p.ty);
+            }
         }
     }
 
     /// Perform validation checks on any given type
     /// (whether it be a struct field, a method argument, etc.)
-    /// Currently used to check if a given type is a slice of structs,
-    /// and ensure the relevant attributes are set there.
-    fn validate_ty<P: super::TyPosition>(&self, errors: &mut ErrorStore, ty: &hir::Type<P>) {
+    fn validate_ty<P: super::TyPosition>(&self, ctx: &mut LoweringContext, ty: &hir::Type<P>) {
         match ty {
             hir::Type::Slice(hir::Slice::Struct(_, st)) => {
                 let st = self.resolve_type(st.id());
                 match st {
                     TypeDef::Struct(st) => {
                         if !st.attrs.abi_compatible {
-                            errors.push(LoweringError::Other(format!(
+                            ctx.errors.push(LoweringError::Other(format!(
                                 "Cannot construct a slice of {:?}. Try marking with `#[diplomat::attr(auto, abi_compatible)]`",
                                 st.name
                             )));
                         }
                     }
                     _ => unreachable!(),
+                }
+            }
+            hir::Type::Slice(hir::Slice::Enum(_, enm)) => {
+                let enm = self.resolve_enum(enm.tcx_id);
+                if !enm.attrs.abi_compatible {
+                    ctx.errors.push(LoweringError::Other(format!(
+                        "Cannot construct a slice of {:?}. Try marking with `#[diplomat::attr(auto, abi_compatible)]`",
+                        enm.name
+                    )));
                 }
             }
             hir::Type::Struct(st) => {
@@ -531,7 +587,7 @@ impl TypeContext {
                         MaybeOwn::Borrow(b)
                             if b.mutability.is_mutable() && !st_d.attrs.mut_struct_ref =>
                         {
-                            errors.push(LoweringError::Other(format!("Found a mutable struct ref &mut {}. Try marking the struct def with `#[diplomat::attr(auto, mut_struct_ref)]`", st_d.name)));
+                            ctx.errors.push(LoweringError::Other(format!("Found a mutable struct ref &mut {}. Try marking the struct def with `#[diplomat::attr(auto, mut_struct_ref)]`", st_d.name)));
                         }
                         _ => {}
                     },
@@ -547,7 +603,12 @@ impl TypeContext {
                 };
 
                 if can_tuple && !matches!(st.owner(), MaybeOwn::Own) {
-                    errors.push(LoweringError::Other("Tuple structs cannot be passed by reference, this is currently unsupported in Diplomat. See https://github.com/rust-diplomat/diplomat/issues/1143".to_string()));
+                    ctx.errors.push(LoweringError::Other("Tuple structs cannot be passed by reference, this is currently unsupported in Diplomat. See https://github.com/rust-diplomat/diplomat/issues/1143".to_string()));
+                }
+            }
+            hir::Type::Callback(cb) => {
+                if let Ok(cb_ret) = cb.get_output_type() {
+                    self.validate_callback_ret(cb_ret, ctx)
                 }
             }
             _ => {}
@@ -589,12 +650,12 @@ impl TypeContext {
     /// Also validates the type of each given parameter.
     fn validate_ty_in_method<P: hir::TyPosition>(
         &self,
-        errors: &mut ErrorStore,
+        ctx: &mut LoweringContext,
         param: Param,
         param_ty: &hir::Type<P>,
         method: &hir::Method,
     ) {
-        self.validate_ty(errors, param_ty);
+        self.validate_ty(ctx, param_ty);
 
         let linked = match &param_ty {
             hir::Type::Opaque(p) => p.link_lifetimes(self),
@@ -606,7 +667,7 @@ impl TypeContext {
                     match l {
                         MaybeStatic::NonStatic(ns) if out.contains(&ns) => {
                             let lt_name = method.lifetime_env.fmt_lifetime(ns);
-                            errors.push(LoweringError::Other(format!("Opaque slices ({param}) cannot be borrowed from. Suggestion: remove &'{lt_name} from method output.")));
+                            ctx.errors.push(LoweringError::Other(format!("Opaque slices ({param}) cannot be borrowed from. Suggestion: remove &'{lt_name} from method output.")));
                         }
                         _ => {}
                     }
@@ -658,78 +719,54 @@ impl TypeContext {
                         // This case is technically already handled in the lifetime lowerer, we're being careful
                         "comes from &-ref's lifetime in parameter".into()
                     };
-                    errors.push(LoweringError::Other(format!("Method should explicitly include this \
+                    ctx.errors.push(LoweringError::Other(format!("Method should explicitly include this \
                                         lifetime bound from {param}: '{use_longer_name}: '{use_name} ({def_cause})")))
                 }
             }
         }
     }
 
-    fn validate_type_def(&self, errors: &mut ErrorStore, def: TypeDef) {
+    fn validate_type_def(&self, ctx: &mut LoweringContext, def: TypeDef) {
         if let TypeDef::Struct(st) = def {
-            self.validate_struct(errors, st);
+            self.validate_struct(ctx, st);
         }
     }
 
-    fn validate_trait(&self, errors: &mut ErrorStore, def: &TraitDef) {
-        for m in &def.methods {
-            for p in &m.params {
-                self.validate_ty(errors, &p.ty);
-            }
-
-            let success = match &*m.output {
-                hir::ReturnType::Infallible(success) | hir::ReturnType::Nullable(success) => {
-                    success
-                }
-                hir::ReturnType::Fallible(success, fallible) => {
-                    if let Some(f) = fallible {
-                        self.validate_ty(errors, f);
-                    }
-                    success
-                }
-            };
-
-            if let hir::SuccessType::OutType(o) = success {
-                self.validate_ty(errors, o);
-            }
-        }
-    }
-
-    fn validate_struct<P: hir::TyPosition>(&self, errors: &mut ErrorStore, st: &StructDef<P>) {
+    fn validate_struct<P: hir::TyPosition>(&self, ctx: &mut LoweringContext, st: &StructDef<P>) {
         if st.attrs.abi_compatible && st.lifetimes.num_lifetimes() > 0 {
-            errors.push(LoweringError::Other(format!(
+            ctx.errors.push(LoweringError::Other(format!(
                 "Struct {:?} cannot have any lifetimes if it is marked as ABI compatible.",
                 st.name
             )));
         }
 
         for f in &st.fields {
-            self.validate_ty(errors, &f.ty);
+            self.validate_ty(ctx, &f.ty);
 
             if matches!(f.ty, hir::Type::Struct(..))
                 && (f.ty.is_immutably_borrowed() || f.ty.is_mutably_borrowed())
             {
-                errors.push(LoweringError::Other(format!(
+                ctx.errors.push(LoweringError::Other(format!(
                     "Struct {:?} field {:?} cannot be borrowed. Structs cannot be borrowed inside of other structs, try removing the borrow and storing the struct directly.",
                      st.name, f.name
                 )));
             }
             if st.attrs.abi_compatible {
                 match &f.ty {
-                    hir::Type::Primitive(..) => {}
+                    hir::Type::Primitive(..) | hir::Type::Enum(..) => {}
                     hir::Type::Struct(st_pth) => {
                         let ty = self.resolve_type(st_pth.id());
                         match ty {
                             TypeDef::Struct(f_st) => {
                                 if !f_st.attrs.abi_compatible {
-                                    errors.push(LoweringError::Other(format!(
+                                    ctx.errors.push(LoweringError::Other(format!(
                                         "Struct {:?} field {:?} type {:?} must be marked with `#[diplomat::attr(auto, abi_compatible)]`.",
                                         st.name, f.name, f_st.name
                                     )));
                                 }
                             }
                             TypeDef::OutStruct(out) => {
-                                errors.push(LoweringError::Other(
+                                ctx.errors.push(LoweringError::Other(
                                     format!("Out struct {out:?} cannot be included in structs marked with #[diplomat::attr(auto, abi_compatible)].")
                                 ));
                             }
@@ -737,11 +774,42 @@ impl TypeContext {
                         }
                     }
                     _ => {
-                        errors.push(LoweringError::Other(format!(
-                            "Cannot construct a slice of {:?} with non-primitive, non-struct field {:?}",
+                        ctx.errors.push(LoweringError::Other(format!(
+                            "Cannot construct a slice of {:?} with non-primitive, non-enum, non-struct field {:?}",
                             st.name, f.name
                         )));
                     }
+                }
+            }
+        }
+    }
+
+    fn validate_callback_ret(
+        &self,
+        return_type: &crate::hir::ReturnType<crate::hir::InputOnly>,
+        ctx: &mut LoweringContext,
+    ) {
+        if ctx
+            .attr_validator
+            .attrs_supported()
+            .callback_returns_must_be_fallible
+        {
+            match return_type {
+                hir::ReturnType::Fallible(_, err) => {
+                    let is_valid = if let Some(hir::Type::Enum(e)) = err {
+                        let e = self.resolve_enum(e.tcx_id);
+                        let is_valid = e.variants.iter().find(|v| v.attrs.ffi_error);
+                        is_valid.is_some()
+                    } else {
+                        false
+                    };
+
+                    if !is_valid {
+                        ctx.errors.push(LoweringError::Other("Found non #[diplomat::attr(*, ffi_error)] marked error type in trait return. See https://rust-diplomat.github.io/diplomat/attrs/fallible_callback_returns.html for more.".to_string()));
+                    }
+                }
+                _ => {
+                    ctx.errors.push(LoweringError::Other("Backend callback return types are fallible. Return type must be a `-> Result<T, E>`. See https://rust-diplomat.github.io/diplomat/attrs/fallible_callback_returns.html for more.".to_string()));
                 }
             }
         }
@@ -909,9 +977,8 @@ impl TryInto<TraitId> for SymbolId {
 
 #[cfg(test)]
 mod tests {
-    use crate::ast::SpanLocation;
+    use crate::ast::{write_report, SpanLocation};
     use crate::hir;
-    use std::fmt::Write;
 
     macro_rules! uitest_lowering {
         ($($file:tt)*) => {
@@ -926,8 +993,8 @@ mod tests {
             match hir::TypeContext::from_syn(&parsed, Default::default(), attr_validator, None, &SpanLocation::None) {
                 Ok(_context) => (),
                 Err(e) => {
-                    for (ctx, err) in e {
-                        writeln!(&mut output, "Lowering error in {ctx}: {err}").unwrap();
+                    for err in e {
+                    write_report(&err.ast_report(), &mut output, crate::ast::logging::PrettyPrint::ForceUgly).unwrap();
                     }
                 }
             };
@@ -935,6 +1002,44 @@ mod tests {
                 insta::assert_snapshot!(output)
             });
         }
+    }
+
+    macro_rules! file_test_lowering {
+        ($file_name:expr) => {
+            let folder_pth_name = format!("src/hir/snapshots/span_testing");
+            let folder_pth = std::path::Path::new(&folder_pth_name);
+            let file_path = folder_pth.join($file_name);
+
+            let st = std::fs::read_to_string(&file_path).expect("Could not read file.");
+            let parsed = syn::parse_str::<syn::File>(&st).expect("Could not read file");
+
+            let mut attr_validator = hir::BasicAttributeValidator::new("tests");
+            attr_validator.support.option = true;
+
+            let mut output = String::new();
+            match hir::TypeContext::from_syn(
+                &parsed,
+                Default::default(),
+                attr_validator,
+                None,
+                &SpanLocation::FilePath(format!("{}/{}", folder_pth_name, $file_name)),
+            ) {
+                Ok(_context) => (),
+                Err(e) => {
+                    for err in e {
+                        use std::fmt::Write;
+                        write_report(
+                            &err.ast_report(),
+                            &mut output,
+                            crate::ast::logging::PrettyPrint::ForceUgly,
+                        )
+                        .unwrap();
+                        writeln!(output, "").unwrap();
+                    }
+                }
+            };
+            insta::with_settings!({}, { insta::assert_snapshot!(output) });
+        };
     }
 
     #[test]
@@ -1215,21 +1320,10 @@ mod tests {
             }
         };
     }
+
     #[test]
     fn test_struct_forbidden() {
-        uitest_lowering! {
-            #[diplomat::bridge]
-            mod ffi {
-                struct Crimes<'a> {
-                    slice1: &'a str,
-                    slice1: &'a DiplomatStr,
-                    slice2: &'a [u8],
-                    slice3: Box<str>,
-                    slice3: Box<DiplomatStr>,
-                    slice4: Box<[u8]>,
-                }
-            }
-        };
+        file_test_lowering! {"test_struct_forbidden.rs"};
     }
 
     #[test]
@@ -1365,8 +1459,13 @@ mod tests {
         ) {
             Ok(_context) => (),
             Err(e) => {
-                for (ctx, err) in e {
-                    writeln!(&mut output, "Lowering error in {ctx}: {err}").unwrap();
+                for err in e {
+                    write_report(
+                        &err.ast_report(),
+                        &mut output,
+                        crate::ast::logging::PrettyPrint::ForceUgly,
+                    )
+                    .unwrap();
                 }
             }
         };
@@ -1405,8 +1504,13 @@ mod tests {
         ) {
             Ok(_context) => (),
             Err(e) => {
-                for (ctx, err) in e {
-                    writeln!(&mut output, "Lowering error in {ctx}: {err}").unwrap();
+                for err in e {
+                    write_report(
+                        &err.ast_report(),
+                        &mut output,
+                        crate::ast::logging::PrettyPrint::ForceUgly,
+                    )
+                    .unwrap();
                 }
             }
         };
@@ -1447,8 +1551,13 @@ mod tests {
         ) {
             Ok(_context) => (),
             Err(e) => {
-                for (ctx, err) in e {
-                    writeln!(&mut output, "Lowering error in {ctx}: {err}").unwrap();
+                for err in e {
+                    write_report(
+                        &err.ast_report(),
+                        &mut output,
+                        crate::ast::logging::PrettyPrint::ForceUgly,
+                    )
+                    .unwrap();
                 }
             }
         };
@@ -1485,8 +1594,13 @@ mod tests {
         ) {
             Ok(_context) => (),
             Err(e) => {
-                for (ctx, err) in e {
-                    writeln!(&mut output, "Lowering error in {ctx}: {err}").unwrap();
+                for err in e {
+                    write_report(
+                        &err.ast_report(),
+                        &mut output,
+                        crate::ast::logging::PrettyPrint::ForceUgly,
+                    )
+                    .unwrap();
                 }
             }
         };
@@ -1530,8 +1644,13 @@ mod tests {
         {
             Ok(_context) => (),
             Err(e) => {
-                for (ctx, err) in e {
-                    writeln!(&mut output, "Lowering error in {ctx}: {err}").unwrap();
+                for err in e {
+                    write_report(
+                        &err.ast_report(),
+                        &mut output,
+                        crate::ast::logging::PrettyPrint::ForceUgly,
+                    )
+                    .unwrap();
                 }
             }
         };
@@ -1570,8 +1689,108 @@ mod tests {
         {
             Ok(_context) => (),
             Err(e) => {
-                for (ctx, err) in e {
-                    writeln!(&mut output, "Lowering error in {ctx}: {err}").unwrap();
+                for err in e {
+                    write_report(
+                        &err.ast_report(),
+                        &mut output,
+                        crate::ast::logging::PrettyPrint::ForceUgly,
+                    )
+                    .unwrap();
+                }
+            }
+        };
+        insta::with_settings!({}, { insta::assert_snapshot!(output) });
+    }
+
+    /// Callbacks and trait methods may return an optional borrowed opaque.
+    /// Lowering used to abort with "Could not resolve symbol" instead, because
+    /// the opaque check resolved the returned type against its own path rather
+    /// than against the module the method is declared in.
+    #[test]
+    fn test_callback_optional_opaque_return() {
+        let parsed: syn::File = syn::parse_quote! {
+            #[diplomat::bridge]
+            mod ffi {
+                #[diplomat::opaque]
+                pub struct Foo(u8);
+
+                pub trait Getter {
+                    fn get(&self) -> Option<&Foo>;
+                }
+
+                impl Foo {
+                    pub fn apply_callback(&self, cb: impl FnMut(&Foo) -> Option<&Foo>) {}
+
+                    pub fn apply_self_callback(&self, cb: impl FnMut(&Foo) -> Option<&Self>) {}
+
+                    pub fn apply_trait(&self, g: impl Getter) {}
+                }
+            }
+        };
+
+        let mut output = String::new();
+
+        let mut attr_validator = hir::BasicAttributeValidator::new("tests");
+        attr_validator.support.callbacks = true;
+        attr_validator.support.traits = true;
+        let config = super::LoweringConfig {
+            unsafe_references_in_callbacks: true,
+        };
+        match hir::TypeContext::from_syn(&parsed, config, attr_validator, None, &SpanLocation::None)
+        {
+            Ok(_context) => (),
+            Err(e) => {
+                for err in e {
+                    write_report(
+                        &err.ast_report(),
+                        &mut output,
+                        crate::ast::logging::PrettyPrint::ForceUgly,
+                    )
+                    .unwrap();
+                }
+            }
+        };
+        assert!(
+            output.is_empty(),
+            "expected lowering to succeed, got:\n{output}"
+        );
+    }
+
+    /// The companion diagnostic to [`test_callback_optional_opaque_return`]:
+    /// spelling the same return type `DiplomatOption<&T>` is still rejected,
+    /// and now reaches its intended error instead of aborting lowering.
+    #[test]
+    fn test_callback_diplomat_option_opaque_return_fails() {
+        let parsed: syn::File = syn::parse_quote! {
+            #[diplomat::bridge]
+            mod ffi {
+                #[diplomat::opaque]
+                pub struct Foo(u8);
+
+                impl Foo {
+                    pub fn apply_callback(&self, cb: impl FnMut(&Foo) -> DiplomatOption<&Foo>) {}
+                }
+            }
+        };
+
+        let mut output = String::new();
+
+        let mut attr_validator = hir::BasicAttributeValidator::new("tests");
+        attr_validator.support.callbacks = true;
+        let config = super::LoweringConfig {
+            unsafe_references_in_callbacks: true,
+        };
+        match hir::TypeContext::from_syn(&parsed, config, attr_validator, None, &SpanLocation::None)
+        {
+            Ok(_context) => (),
+            Err(e) => {
+                for err in e {
+                    write_report(
+                        &err.ast_report(),
+                        &mut output,
+                        crate::ast::logging::PrettyPrint::ForceUgly,
+                    )
+                    .unwrap();
                 }
             }
         };
@@ -1700,8 +1919,13 @@ mod tests {
         {
             Ok(_context) => (),
             Err(e) => {
-                for (ctx, err) in e {
-                    writeln!(&mut output, "Lowering error in {ctx}: {err}").unwrap();
+                for err in e {
+                    write_report(
+                        &err.ast_report(),
+                        &mut output,
+                        crate::ast::logging::PrettyPrint::ForceUgly,
+                    )
+                    .unwrap();
                 }
             }
         };
@@ -1737,8 +1961,13 @@ mod tests {
         {
             Ok(_context) => (),
             Err(e) => {
-                for (ctx, err) in e {
-                    writeln!(&mut output, "Lowering error in {ctx}: {err}").unwrap();
+                for err in e {
+                    write_report(
+                        &err.ast_report(),
+                        &mut output,
+                        crate::ast::logging::PrettyPrint::ForceUgly,
+                    )
+                    .unwrap();
                 }
             }
         };
@@ -1811,6 +2040,215 @@ mod tests {
         let (_, tcx) =
             crate::hir::TypeContext::from_ast_without_validation(&env, Default::default(), backend)
                 .unwrap();
+
+        insta::assert_debug_snapshot!(tcx);
+    }
+
+    #[test]
+    fn test_ffi_errors() {
+        let parsed: syn::File = syn::parse_quote! {
+            #[diplomat::bridge]
+            mod ffi {
+                struct SomeStruct {
+                    a : i32
+                }
+
+                impl SomeStruct {
+                    pub fn callback_unit_type_not_okay(cb : impl Fn(u32) -> ()) {}
+                }
+
+                enum SomeEnum {
+                    B,
+                    #[diplomat::attr(*, ffi_error)]
+                    A,
+                }
+
+                enum UnmarkedEnum {
+                    A,
+                    B
+                }
+
+                pub trait SomeTrait {
+                    fn returns_unit_not_okay();
+                    fn returns_nullable_not_okay() -> Option<()>;
+                    // This is not okay because it's not clear whether the error is an FFI error or not:
+                    fn returns_fallible_unit_not_okay() -> Result<(), ()>;
+                    // TODO: Will be supported
+                    fn returns_fallible_struct_not_okay() -> Result<(), SomeStruct>;
+                    fn returns_fallible_marked_enum_okay() -> Result<(), SomeEnum>;
+                    fn returns_fallible_unmarked_enum_not_okay() -> Result<(), UnmarkedEnum>;
+                    fn returns_fallible_primitive_not_okay() -> Result<(), bool>;
+                }
+            }
+        };
+
+        let mut output = String::new();
+
+        let mut attr_validator = hir::BasicAttributeValidator::new("tests");
+        attr_validator.support.callback_returns_must_be_fallible = true;
+        attr_validator.support.callbacks = true;
+        match hir::TypeContext::from_syn(
+            &parsed,
+            Default::default(),
+            attr_validator,
+            None,
+            &SpanLocation::None,
+        ) {
+            Ok(_context) => (),
+            Err(e) => {
+                for err in e {
+                    write_report(
+                        &err.ast_report(),
+                        &mut output,
+                        crate::ast::logging::PrettyPrint::ForceUgly,
+                    )
+                    .unwrap();
+                }
+            }
+        };
+        insta::with_settings!({}, { insta::assert_snapshot!(output) });
+    }
+
+    #[test]
+    fn test_abi_compatible_enum() {
+        let parsed: syn::File = syn::parse_quote! {
+            #[diplomat::bridge]
+            mod ffi {
+                #[diplomat::attr(auto, abi_compatible)]
+                pub enum SliceableEnum {
+                    A,
+                    B,
+                }
+
+                pub enum RegularEnum {
+                    X,
+                    Y,
+                }
+
+                #[diplomat::attr(auto, abi_compatible)]
+                pub struct StructWithEnum {
+                    pub a: SliceableEnum,
+                    pub b: RegularEnum,
+                    pub c: u32,
+                }
+
+                impl StructWithEnum {
+                    pub fn takes_slices<'a>(
+                        enums: &'a [SliceableEnum],
+                        mut_enums: &'a mut [SliceableEnum],
+                        structs: &'a [StructWithEnum],
+                    ) -> &'a [SliceableEnum] {
+                        todo!()
+                    }
+                }
+            }
+        };
+
+        let mut attr_validator = hir::BasicAttributeValidator::new("tests");
+        attr_validator.support.abi_compatibles = true;
+        attr_validator.support.mutable_slices = true;
+        let res = hir::TypeContext::from_syn(
+            &parsed,
+            Default::default(),
+            attr_validator,
+            None,
+            &SpanLocation::None,
+        );
+        assert!(
+            res.is_ok(),
+            "expected lowering to succeed, got: {:?}",
+            res.err()
+        );
+
+        let parsed_invalid: syn::File = syn::parse_quote! {
+            #[diplomat::bridge]
+            mod ffi {
+                pub enum UnmarkedEnum {
+                    X,
+                    Y,
+                }
+
+                impl UnmarkedEnum {
+                    pub fn bad_slice(s: &[UnmarkedEnum]) {}
+                }
+            }
+        };
+
+        let mut attr_validator = hir::BasicAttributeValidator::new("tests");
+        attr_validator.support.abi_compatibles = true;
+        let res_invalid = hir::TypeContext::from_syn(
+            &parsed_invalid,
+            Default::default(),
+            attr_validator,
+            None,
+            &SpanLocation::None,
+        );
+        let errs = res_invalid.expect_err("expected unmarked enum slice to fail");
+        assert!(
+            errs.iter()
+                .any(|e| e.to_string().contains("Cannot construct a slice of")),
+            "unexpected errors: {errs:?}"
+        );
+    }
+
+    #[test]
+    fn test_write_types_lowering() {
+        uitest_lowering! {
+            #[diplomat::bridge]
+            mod ffi {
+                #[diplomat::opaque]
+                pub struct Foo;
+
+                impl Foo {
+                    pub fn write_str(&self, w: &mut DiplomatWrite) {}
+                    pub fn write_str16(&self, w: &mut DiplomatWrite16) {}
+                    pub fn write_generic(&self, w: &mut DiplomatWriteGeneric<u32>) {}
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_write_types_supported() {
+        let m = crate::ast::Module::from_syn(
+            &syn::parse_quote! {
+                #[diplomat::bridge]
+                mod ffi {
+                    #[diplomat::opaque]
+                    pub struct Foo;
+
+                    impl Foo {
+                        pub fn write_str(&self, w: &mut DiplomatWrite) {}
+                        #[diplomat::attr(auto, stringifier)]
+                        pub fn write_str16(&self, w: &mut DiplomatWrite16) {}
+                        pub fn write_generic(&self, w: &mut DiplomatWriteGeneric<u32>) {}
+                    }
+                }
+            },
+            true,
+            None,
+            &crate::ast::SpanLocation::None,
+        );
+        let mut env = crate::Env::default();
+        let mut top_symbols = crate::ModuleEnv::new(Default::default());
+
+        m.insert_all_types(crate::ast::Path::empty(), &mut env);
+        top_symbols.insert(
+            m.name.clone(),
+            crate::ast::ModSymbol::SubModule(m.name.clone()),
+        );
+        env.insert(crate::ast::Path::empty(), top_symbols);
+
+        let mut backend = crate::hir::BasicAttributeValidator::new("test-backend");
+        backend.support.stringifiers = true;
+        backend.support.utf16_writeables = true;
+        backend.support.generic_writeables = true;
+
+        let (mut ctx, tcx) =
+            crate::hir::TypeContext::from_ast_without_validation(&env, Default::default(), backend)
+                .unwrap();
+        tcx.validate(&mut ctx);
+        assert!(ctx.errors.is_empty());
 
         insta::assert_debug_snapshot!(tcx);
     }

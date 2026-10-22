@@ -120,7 +120,7 @@ impl<'tcx> ItemGenContext<'_, 'tcx> {
     /// Generate `.d.ts` equivalents for -> Result<>, or -> Option<>, etc.
     pub(super) fn gen_success_ty(&self, out_ty: &SuccessType) -> Cow<'tcx, str> {
         match out_ty {
-            SuccessType::Write => self.formatter.fmt_string().into(),
+            SuccessType::Write(..) => self.formatter.fmt_string().into(),
             SuccessType::OutType(o) => self.gen_js_type_str(o),
             SuccessType::Unit => self.formatter.fmt_void().into(),
             _ => unreachable!("Unknown success type {out_ty:?}"),
@@ -330,8 +330,8 @@ impl<'tcx> ItemGenContext<'_, 'tcx> {
             | ReturnType::Fallible(SuccessType::Unit, Some(_)) => self.formatter.fmt_void().into(),
 
             // Something we can write to? We just treat it as a string.
-            ReturnType::Infallible(SuccessType::Write)
-            | ReturnType::Fallible(SuccessType::Write, Some(_)) => {
+            ReturnType::Infallible(SuccessType::Write(..))
+            | ReturnType::Fallible(SuccessType::Write(..), Some(_)) => {
                 self.formatter.fmt_string().into()
             }
 
@@ -340,8 +340,8 @@ impl<'tcx> ItemGenContext<'_, 'tcx> {
             | ReturnType::Fallible(SuccessType::OutType(ref o), Some(_)) => self.gen_js_type_str(o),
 
             // Nullable string (no error on return).
-            ReturnType::Fallible(SuccessType::Write, None)
-            | ReturnType::Nullable(SuccessType::Write) => self
+            ReturnType::Fallible(SuccessType::Write(..), None)
+            | ReturnType::Nullable(SuccessType::Write(..)) => self
                 .formatter
                 .fmt_nullable(self.formatter.fmt_string())
                 .into(),
@@ -381,13 +381,17 @@ impl<'tcx> ItemGenContext<'_, 'tcx> {
             // -> ()
             ReturnType::Infallible(SuccessType::Unit) => None,
 
-            ReturnType::Infallible(SuccessType::Write) => {
+            ReturnType::Infallible(SuccessType::Write(ref w)) => {
                 method_info
                     .alloc_expressions
                     .push("const write = new diplomatRuntime.DiplomatWriteBuf(wasm);".into());
                 method_info.param_conversions.push("write.buffer".into());
                 method_info.cleanup_expressions.push("write.free();".into());
-                Some("return write.readString8();".into())
+                match w {
+                    hir::WriteType::Str => Some("return write.readString8();".into()),
+                    hir::WriteType::Str16 => Some("return write.readString16();".into()),
+                    _ => unreachable!("Unsupported WriteType"),
+                }
             }
 
             // Any out that is not a [`SuccessType::Write`].
@@ -429,14 +433,22 @@ impl<'tcx> ItemGenContext<'_, 'tcx> {
             | ReturnType::Nullable(SuccessType::Unit) => Some("return result === 1;".into()),
 
             // Result<Write, ()> or Option<Write>.
-            ReturnType::Fallible(SuccessType::Write, None)
-            | ReturnType::Nullable(SuccessType::Write) => {
+            ReturnType::Fallible(SuccessType::Write(ref w), None)
+            | ReturnType::Nullable(SuccessType::Write(ref w)) => {
                 method_info
                     .alloc_expressions
                     .push("const write = new diplomatRuntime.DiplomatWriteBuf(wasm);".into());
                 method_info.param_conversions.push("write.buffer".into());
                 method_info.cleanup_expressions.push("write.free();".into());
-                Some("return result === 0 ? null : write.readString8();".into())
+                match w {
+                    hir::WriteType::Str => {
+                        Some("return result === 0 ? null : write.readString8();".into())
+                    }
+                    hir::WriteType::Str16 => {
+                        Some("return result === 0 ? null : write.readString16();".into())
+                    }
+                    _ => unreachable!("Unsupported WriteType"),
+                }
             }
 
             // Result<Type, Error> or Option<Type>
@@ -495,7 +507,7 @@ impl<'tcx> ItemGenContext<'_, 'tcx> {
                     SuccessType::OutType(ref o) => {
                         crate::js::layout::type_size_alignment(o, self.tcx)
                     }
-                    SuccessType::Write => match return_type {
+                    SuccessType::Write(..) => match return_type {
                         ReturnType::Fallible(_, ref err) if err.is_some() => {
                             crate::js::layout::type_size_alignment(&err.clone().unwrap(), self.tcx)
                         }
@@ -547,13 +559,18 @@ impl<'tcx> ItemGenContext<'_, 'tcx> {
                 Some(
                     match ok {
                         SuccessType::Unit => err_check,
-                        SuccessType::Write => {
+                        SuccessType::Write(ref w) => {
                             method_info.alloc_expressions.push(
                                 "const write = new diplomatRuntime.DiplomatWriteBuf(wasm);".into(),
                             );
                             method_info.param_conversions.push("write.buffer".into());
                             method_info.cleanup_expressions.push("write.free();".into());
-                            format!("{err_check}return write.readString8();")
+                            let read_fn = match w {
+                                hir::WriteType::Str => "readString8",
+                                hir::WriteType::Str16 => "readString16",
+                                _ => unreachable!("Unsupported WriteType"),
+                            };
+                            format!("{err_check}return write.{read_fn}();")
                         }
                         SuccessType::OutType(ref o) => {
                             let ptr_deref = self.gen_c_to_js_deref_for_type(
@@ -629,17 +646,17 @@ impl<'tcx> ItemGenContext<'_, 'tcx> {
         match *ty {
             Type::Primitive(p) => self.maybe_wrap_in_write(js_name, gen_context, p),
             Type::Opaque(ref op) if op.is_optional() => self.maybe_wrap_in_write(
-                format!("{js_name}?.ffiValue ?? 0").into(),
+                format!("{js_name} === null || {js_name} instanceof {ty} ? {js_name}?.ffiValue ?? 0 : typeError('{js_name}', '{ty}')", ty = self.formatter.fmt_type_name(op.tcx_id.into())).into(),
                 gen_context,
                 PrimitiveType::Int(IntType::U32),
             ),
-            Type::Opaque(..) => self.maybe_wrap_in_write(
-                format!("{js_name}.ffiValue").into(),
+            Type::Opaque(ref op) => self.maybe_wrap_in_write(
+                format!("{js_name} instanceof {ty} ? {js_name}.ffiValue : typeError('{js_name}', '{ty}')", ty = self.formatter.fmt_type_name(op.tcx_id.into())).into(),
                 gen_context,
                 PrimitiveType::Int(IntType::U32),
             ),
-            Type::Enum(..) => self.maybe_wrap_in_write(
-                format!("{js_name}.ffiValue").into(),
+            Type::Enum(ref e) => self.maybe_wrap_in_write(
+                format!("new {}({js_name}).ffiValue", self.formatter.fmt_type_name(e.tcx_id.into())).into(),
                 gen_context,
                 PrimitiveType::Int(IntType::I32),
             ),
@@ -670,7 +687,7 @@ impl<'tcx> ItemGenContext<'_, 'tcx> {
                         unreachable!("Used SlicePrealloc context for an Option type!");
                     }
                     JsToCConversionContext::List => {
-                        let a = alloc.unwrap_or_else(|| {
+                        if alloc.is_none() {
                             let id = if let Some(id) = inner.id() {
                                 self.formatter.fmt_type_name(id)
                             } else {
@@ -678,8 +695,8 @@ impl<'tcx> ItemGenContext<'_, 'tcx> {
                             };
 
                             panic!("Expected an allocator to be specified when generating the definition for an Option<{id}>")
-                        });
-                        format!("diplomatRuntime.optionToBufferForCalling(wasm, {js_name}, {size}, {align}, {a}, (arrayBuffer, offset, jsValue) => [{inner_conversion}])").into()
+                        }
+                        format!("diplomatRuntime.optionToBufferForCalling(wasm, {js_name}, {size}, {align}, functionCleanupArena, (arrayBuffer, offset, jsValue) => [{inner_conversion}])").into()
                     }
                     JsToCConversionContext::WriteToBuffer(offset_var, offset) => {
                         format!("diplomatRuntime.writeOptionToArrayBuffer(arrayBuffer, {offset_var} + {offset}, {js_name}, {size}, {align}, (arrayBuffer, offset, jsValue) => {inner_conversion})").into()

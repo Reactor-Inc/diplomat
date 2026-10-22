@@ -100,8 +100,13 @@ template<typename T> struct WriteTrait {
 
 If you use `WriteTrait`, you will be interfacing with the [C ABI of DiplomatWrite](./c.md#diplomatwrite).
 
+Similarly, functions taking `&mut DiplomatWrite16` return `std::u16string` in C++ (via `WriteTrait<std::u16string>`), and functions taking `&mut DiplomatWriteGeneric<T>` return `std::vector<T>` in C++ (via `WriteTrait<std::vector<T>>`), each also generating a `_write` method accepting custom `WriteTrait` specializations.
+
 ### Callbacks
 Callbacks are represented as `std::function<Ret(Args...)>`, where `Ret` and `Args...` are diplomat-friendly C++ types. These work just like any other C++ callback function and are converted in to the C ABI with some templating.
+
+### Traits
+Traits are implemented as abstract classes with `virtual` functions that must be overridden. When a method accepts a trait in C++, it will be a `std::unique_ptr` of the abstract class, and will be converted into the [C VTable of the trait](./c.md#traits).
 
 ### Struct References
 

@@ -7,7 +7,23 @@ Method {
         lines: "",
         rust_links: [],
     },
-    name: "elided",
+    name: Ident(
+        "elided",
+        Some(
+            Span {
+                start: LineColumn {
+                    line: 1,
+                    col: 0,
+                },
+                end: LineColumn {
+                    line: 1,
+                    col: 0,
+                },
+                range: 0..0,
+                span_location: None,
+            },
+        ),
+    ),
     abi_name: "Opaque_elided",
     lifetime_env: LifetimeEnv {
         nodes: [],
@@ -36,6 +52,7 @@ Method {
             ),
             attrs: Attrs {
                 disable: false,
+                unstable: false,
                 deprecated: None,
                 namespace: None,
                 rename: RenameAttr {
@@ -58,9 +75,12 @@ Method {
                     },
                 },
                 generate_mocking_interface: false,
+                manually_disposable: false,
                 abi_compatible: false,
+                ffi_error: false,
                 mut_struct_ref: false,
                 tuple: false,
+                precondition_violation: false,
                 custom_extra_code: {},
                 default_value: None,
             },
@@ -98,6 +118,7 @@ Method {
             ),
             attrs: Attrs {
                 disable: false,
+                unstable: false,
                 deprecated: None,
                 namespace: None,
                 rename: RenameAttr {
@@ -120,9 +141,12 @@ Method {
                     },
                 },
                 generate_mocking_interface: false,
+                manually_disposable: false,
                 abi_compatible: false,
+                ffi_error: false,
                 mut_struct_ref: false,
                 tuple: false,
+                precondition_violation: false,
                 custom_extra_code: {},
                 default_value: None,
             },
@@ -133,6 +157,7 @@ Method {
     ),
     attrs: Attrs {
         disable: false,
+        unstable: false,
         deprecated: None,
         namespace: None,
         rename: RenameAttr {
@@ -155,9 +180,12 @@ Method {
             },
         },
         generate_mocking_interface: false,
+        manually_disposable: false,
         abi_compatible: false,
+        ffi_error: false,
         mut_struct_ref: false,
         tuple: false,
+        precondition_violation: false,
         custom_extra_code: {},
         default_value: None,
     },

@@ -27,6 +27,8 @@ pub struct Attrs {
     ///
     /// This attribute is always inherited except to variants
     pub disable: bool,
+    /// Whether this item is `cfg(feature = "unstable")`
+    pub unstable: bool,
     /// Mark this item deprecated in FFI.
     pub deprecated: Option<String>,
     /// An optional namespace. None is equivalent to the root namespace.
@@ -61,13 +63,22 @@ pub struct Attrs {
     pub demo_attrs: DemoInfo,
     /// From #[diplomat::attr()]. If true, generates a mocking interface for this type.
     pub generate_mocking_interface: bool,
+    /// Legacy .NET compatibility attribute. This remains accepted for source
+    /// compatibility but no longer changes generated output.
+    pub manually_disposable: bool,
     /// From #[diplomat::attr()]. If true, Diplomat will check that this struct has the same memory layout in backends which support it. Allows this struct to be used in slices ([`super::Slice::Struct`]) and to be borrowed in function parameters.
     pub abi_compatible: bool,
+    /// From #[diplomat::attr()]. If true, Diplomat will attempt to use the given type to flag backend specific errors.
+    /// Behavior depends on the given type or value.
+    pub ffi_error: bool,
     /// From #[diplomat::attr()], found on structs. If true, Diplomat will allow &mut T references to the struct, and the backend may change the types of fields to better support mutation.
     pub mut_struct_ref: bool,
 
     /// For #[diplomat::attr()]. If true, the struct should be treated as a tuple in function arguments and return values by the language.
     pub tuple: bool,
+
+    /// From #[diplomat::attr()]. Mark an error type as representing a precondition violation (Error in Dart).
+    pub precondition_violation: bool,
 
     /// Information on if a type declaration/impl block has custom bindings, and if so, what kind.
     pub custom_extra_code: HashMap<IncludeLocation, IncludeSource>,
@@ -442,15 +453,17 @@ impl Attrs {
     pub fn from_ast(
         ast: &ast::Attrs,
         validator: &(impl AttributeValidator + ?Sized),
-        parent_attrs: &Attrs,
+        parent_attrs: Attrs,
         errors: &mut ErrorStore,
     ) -> Self {
-        let mut this = parent_attrs.clone();
+        let mut this = parent_attrs;
         // Backends must support this since it applies to the macro/C code.
         // No special inheritance, was already appropriately inherited in AST
         this.abi_rename = ast.abi_rename.clone();
 
         this.deprecated = ast.deprecated.clone();
+
+        this.unstable |= ast.cfg.iter().any(|x| validator.is_unstable(x));
 
         let support = validator.attrs_supported();
         let backend = validator.primary_name();
@@ -567,6 +580,22 @@ impl Attrs {
                             }
                             this.generate_mocking_interface = true;
                         }
+                        "manually_disposable" => {
+                            if let Meta::Path(_) = attr.meta {
+                                if this.manually_disposable {
+                                    errors.push(LoweringError::Other(
+                                        "Duplicate `manually_disposable` attribute".into(),
+                                    ));
+                                } else {
+                                    this.manually_disposable = true;
+                                }
+                            } else {
+                                errors.push(LoweringError::Other(
+                                    "`manually_disposable` must be a simple path".into(),
+                                ));
+                            }
+                            warn_auto(errors);
+                        }
                         "abi_compatible" => {
                             if !support.abi_compatibles {
                                 maybe_error_unsupported(
@@ -578,6 +607,13 @@ impl Attrs {
                                 continue;
                             }
                             this.abi_compatible = true;
+                        }
+                        "ffi_error" => {
+                            if !support.callback_returns_must_be_fallible {
+                                maybe_error_unsupported(auto_found, "ffi_error", backend, errors);
+                                continue;
+                            }
+                            this.ffi_error = true;
                         }
                         "mut_struct_ref" => {
                             if !support.mut_struct_refs {
@@ -597,6 +633,9 @@ impl Attrs {
                                 continue;
                             }
                             this.tuple = true;
+                        }
+                        "precondition_violation" => {
+                            this.precondition_violation = true;
                         }
                         "custom_extra_code" => {
                             let (location, source) =
@@ -644,7 +683,7 @@ impl Attrs {
                         }
                         _ => {
                             errors.push(LoweringError::Other(format!(
-                                "Unknown diplomat attribute {path}: expected one of: `disable, rename, namespace, constructor, stringifier, comparison, named_constructor, getter, setter, custom_extra_code, indexer, error, default_value`"
+                                "Unknown diplomat attribute {path}: expected one of: `disable, rename, namespace, constructor, stringifier, comparison, named_constructor, getter, setter, custom_extra_code, indexer, error, default_value, manually_disposable`"
                             )));
                         }
                     },
@@ -677,19 +716,17 @@ impl Attrs {
                             } else if meta.path.is_ident("default_value") {
                                 let value = meta.value()?;
 
-                                let str_val: String;
-
                                 let ahead = value.lookahead1();
-                                if ahead.peek(syn::LitFloat) {
+                                let str_val = if ahead.peek(syn::LitFloat) {
                                     let s: syn::LitFloat = value.parse()?;
-                                    str_val = s.base10_parse::<f64>()?.to_string();
+                                    s.base10_parse::<f64>()?.to_string()
                                 } else if ahead.peek(syn::LitInt) {
                                     let s: syn::LitInt = value.parse()?;
-                                    str_val = s.base10_parse::<i64>()?.to_string();
+                                    s.base10_parse::<i64>()?.to_string()
                                 } else {
                                     let s: syn::LitStr = value.parse()?;
-                                    str_val = s.value();
-                                }
+                                    s.value()
+                                };
                                 this.demo_attrs.input_cfg.default_value = str_val;
                                 Ok(())
                             } else {
@@ -739,6 +776,7 @@ impl Attrs {
         // use an exhaustive destructure so new attributes are handled
         let Attrs {
             disable,
+            unstable: _unstable,
             deprecated: _deprecated,
             namespace,
             rename,
@@ -748,9 +786,12 @@ impl Attrs {
             default,
             demo_attrs: _,
             generate_mocking_interface,
+            manually_disposable,
             abi_compatible,
+            ffi_error,
             mut_struct_ref,
             tuple,
+            precondition_violation: _,
             custom_extra_code,
             default_value,
         } = &self;
@@ -846,9 +887,13 @@ impl Attrs {
                             errors
                                 .push(LoweringError::Other("Getter cannot have parameters".into()));
                         }
-                        if !matches!(method.output.success_type(), SuccessType::Write) {
+                        if !matches!(
+                            method.output.success_type(),
+                            SuccessType::Write(super::WriteType::Str | super::WriteType::Str16)
+                        ) {
                             errors.push(LoweringError::Other(
-                                "Stringifier must return string".into(),
+                                "Stringifier must return string (contain &mut DiplomatWrite or &mut DiplomatWrite16)"
+                                    .into(),
                             ));
                         }
                     }
@@ -1131,9 +1176,31 @@ impl Attrs {
             ));
         }
 
-        if *abi_compatible && !matches!(context, AttributeContext::Type(TypeDef::Struct(..))) {
+        if *manually_disposable && !matches!(context, AttributeContext::Type(TypeDef::Opaque(..))) {
             errors.push(LoweringError::Other(
-                "`abi_compatible` can only be used on non-output-only struct types.".into(),
+                "`manually_disposable` can only be used on opaque types".to_string(),
+            ));
+        }
+
+        if *abi_compatible
+            && !matches!(
+                context,
+                AttributeContext::Type(TypeDef::Struct(..) | TypeDef::Enum(..))
+            )
+        {
+            errors.push(LoweringError::Other(
+                "`abi_compatible` can only be used on non-output-only struct or enum types.".into(),
+            ));
+        }
+
+        if *ffi_error
+            && !matches!(
+                context,
+                AttributeContext::Field | AttributeContext::EnumVariant(..)
+            )
+        {
+            errors.push(LoweringError::Other(
+                "`ffi_error` is only supported on struct fields or enum variants.".into(),
             ));
         }
 
@@ -1217,6 +1284,7 @@ impl Attrs {
         Attrs {
             disable,
             deprecated: None,
+            unstable: self.unstable,
             rename,
             namespace,
             // Should not inherit from enums to their variants
@@ -1230,10 +1298,13 @@ impl Attrs {
             demo_attrs: Default::default(),
             // Not inherited
             generate_mocking_interface: false,
+            manually_disposable: false,
             abi_compatible: false,
+            ffi_error: false,
             mut_struct_ref: false,
             // Not inherited
             tuple: false,
+            precondition_violation: false,
             // Not inherited
             custom_extra_code: Default::default(),
             // Not inherited
@@ -1278,9 +1349,26 @@ pub struct BackendAttrSupport {
     pub non_exhaustive_structs: bool,
     /// Whether the language supports method overloading
     pub method_overloading: bool,
-    /// Whether the language uses UTF-8 strings
+    /// Whether the language's idiomatic string representation uses UTF-8, or the language
+    /// exposes a distinct UTF-8 string type alongside UTF-16 (like C and C++).
+    ///
+    /// Note that all backends can marshal `&str`, `&DiplomatStr`, and `DiplomatWrite`.
+    /// Rather than gating UTF-8 support, `utf8_strings` and `utf16_strings` indicate which
+    /// string overloads a backend wants exposed when a library offers both UTF-8 and UTF-16
+    /// versions of an API:
+    /// - Backends with a single UTF-16 `String` type (JS, Dart, Kotlin, .NET) set
+    ///   `utf8_strings = false, utf16_strings = true` so dual APIs can disable the UTF-8
+    ///   overload and rename the UTF-16 overload as the primary method.
+    /// - Backends with a single UTF-8 `str` type (Nanobind/Python) set
+    ///   `utf8_strings = true, utf16_strings = false`.
+    /// - Backends with distinct UTF-8 and UTF-16 string types (C, C++) set both to `true`
+    ///   so both `foo` (`std::string_view`) and `foo16` (`std::u16string_view`) are exposed.
     pub utf8_strings: bool,
-    /// Whether the language uses UTF-16 strings
+    /// Whether the language's idiomatic string representation uses UTF-16, or the language
+    /// exposes a distinct UTF-16 string type alongside UTF-8 (like C and C++).
+    ///
+    /// See [`Self::utf8_strings`] for how `utf8_strings` and `utf16_strings` interact on
+    /// dual UTF-8/UTF-16 APIs.
     pub utf16_strings: bool,
     /// Whether the language supports using slices with 'static lifetimes.
     pub static_slices: bool,
@@ -1329,6 +1417,8 @@ pub struct BackendAttrSupport {
     pub traits_are_sync: bool,
     /// Whether to generate mocking interface.
     pub generate_mocking_interface: bool,
+    /// Whether this backend accepts the legacy no-op `manually_disposable` attribute.
+    pub manually_disposable: bool,
     /// Passing of structs that only hold (non-slice) primitive types
     /// (for use in slices and languages that support taking direct pointers to structs):
     pub abi_compatibles: bool,
@@ -1357,6 +1447,13 @@ pub struct BackendAttrSupport {
     /// governs the input/field position — a backend can support one without
     /// the other. Currently only used to gate `Box<[u8]>` (byte) returns.
     pub owned_byte_slice_returns: bool,
+    /// If a callback's return in a given backend has the possibility to always fail (with the exception of unit types).
+    /// See https://github.com/rust-diplomat/diplomat/issues/1262
+    pub callback_returns_must_be_fallible: bool,
+    /// Whether the language supports `DiplomatWriteGeneric<T>` primitive writeables.
+    pub generic_writeables: bool,
+    /// Whether the language supports `DiplomatWrite16` UTF-16 string writeables.
+    pub utf16_writeables: bool,
 }
 
 impl BackendAttrSupport {
@@ -1391,6 +1488,7 @@ impl BackendAttrSupport {
             traits_are_send: true,
             traits_are_sync: true,
             generate_mocking_interface: true,
+            manually_disposable: true,
             abi_compatibles: true,
             struct_refs: true,
             mut_struct_refs: true,
@@ -1402,6 +1500,9 @@ impl BackendAttrSupport {
             tuples: true,
             opaque_slices: true,
             owned_byte_slice_returns: true,
+            callback_returns_must_be_fallible: true,
+            generic_writeables: true,
+            utf16_writeables: true,
         }
     }
 
@@ -1432,7 +1533,9 @@ impl BackendAttrSupport {
             "custom_errors" => Some(self.custom_errors),
             "traits_are_send" => Some(self.traits_are_send),
             "traits_are_sync" => Some(self.traits_are_sync),
+            "manually_disposable" => Some(self.manually_disposable),
             "abi_compatibles" => Some(self.abi_compatibles),
+            "ffi_error" => Some(self.callback_returns_must_be_fallible),
             "struct_refs" => Some(self.struct_refs),
             "mut_struct_refs" => Some(self.mut_struct_refs),
             "free_functions" => Some(self.free_functions),
@@ -1441,6 +1544,8 @@ impl BackendAttrSupport {
             "mutable_slices" => Some(self.mutable_slices),
             "tuples" => Some(self.tuples),
             "owned_byte_slice_returns" => Some(self.owned_byte_slice_returns),
+            "generic_writeables" => Some(self.generic_writeables),
+            "utf16_writeables" => Some(self.utf16_writeables),
             _ => None,
         }
     }
@@ -1506,7 +1611,7 @@ pub trait AttributeValidator {
     fn attr_from_ast(
         &self,
         ast: &ast::Attrs,
-        parent_attrs: &Attrs,
+        parent_attrs: Attrs,
         errors: &mut ErrorStore,
     ) -> Attrs {
         Attrs::from_ast(ast, self, parent_attrs, errors)
@@ -1516,6 +1621,8 @@ pub trait AttributeValidator {
     fn validate(&self, attrs: &Attrs, context: AttributeContext, errors: &mut ErrorStore) {
         attrs.validate(self, context, errors)
     }
+
+    fn is_unstable(&self, feature: &syn::Attribute) -> bool;
 }
 
 /// A basic attribute validator
@@ -1533,6 +1640,8 @@ pub struct BasicAttributeValidator {
     pub is_name_value: Option<Box<dyn Fn(&str, &str) -> bool>>,
     /// The features enabled.
     pub features_enabled: HashSet<String>,
+    /// The unstable features.
+    pub semver_unstable_features: HashSet<String>,
 }
 
 impl BasicAttributeValidator {
@@ -1584,6 +1693,7 @@ impl AttributeValidator for BasicAttributeValidator {
                 traits_are_send,
                 traits_are_sync,
                 generate_mocking_interface,
+                manually_disposable,
                 abi_compatibles,
                 struct_refs,
                 mut_struct_refs,
@@ -1595,6 +1705,9 @@ impl AttributeValidator for BasicAttributeValidator {
                 tuples,
                 opaque_slices,
                 owned_byte_slice_returns,
+                callback_returns_must_be_fallible,
+                generic_writeables,
+                utf16_writeables,
             } = self.support;
             match value {
                 "namespacing" => namespacing,
@@ -1625,6 +1738,7 @@ impl AttributeValidator for BasicAttributeValidator {
                 "traits_are_send" => traits_are_send,
                 "traits_are_sync" => traits_are_sync,
                 "generate_mocking_interface" => generate_mocking_interface,
+                "manually_disposable" => manually_disposable,
                 "abi_compatibles" => abi_compatibles,
                 "struct_refs" => struct_refs,
                 "mut_struct_refs" => mut_struct_refs,
@@ -1636,6 +1750,9 @@ impl AttributeValidator for BasicAttributeValidator {
                 "tuples" => tuples,
                 "opaque_slices" => opaque_slices,
                 "owned_byte_slice_returns" => owned_byte_slice_returns,
+                "callback_returns_must_be_fallible" => callback_returns_must_be_fallible,
+                "generic_writeables" => generic_writeables,
+                "utf16_writeables" => utf16_writeables,
                 _ => {
                     return Err(LoweringError::Other(format!(
                         "Unknown supports = value found: {value}"
@@ -1653,12 +1770,19 @@ impl AttributeValidator for BasicAttributeValidator {
     fn attrs_supported(&self) -> BackendAttrSupport {
         self.support
     }
+    fn is_unstable(&self, cfg: &syn::Attribute) -> bool {
+        self.semver_unstable_features.iter().any(|f| {
+            // TODO(#1274): Improve this heuristic
+            cfg.to_token_stream()
+                .to_string()
+                .contains(&format!("feature = {f:?}"))
+        })
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use crate::hir;
-    use std::fmt::Write;
 
     macro_rules! uitest_lowering_attr {
         ($attrs:expr, $($file:tt)*) => {
@@ -1671,8 +1795,8 @@ mod tests {
             match hir::TypeContext::from_syn(&parsed, Default::default(), attr_validator, None, &crate::ast::SpanLocation::None) {
                 Ok(_context) => (),
                 Err(e) => {
-                    for (ctx, err) in e {
-                        writeln!(&mut output, "Lowering error in {ctx}: {err}").unwrap();
+                    for err in e {
+                        crate::ast::write_report(&err.ast_report(), &mut output, crate::ast::logging::PrettyPrint::ForceUgly).unwrap();
                     }
                 }
             };
@@ -2143,6 +2267,32 @@ mod tests {
                     pub fn test(a : i32, b : i64,
                     #[diplomat::attr(*, default_value=100)]
                     c : i128) {}
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_ffi_error_on_enum() {
+        uitest_lowering_attr! { hir::BackendAttrSupport::all_true(),
+            #[diplomat::bridge]
+            mod ffi {
+                pub struct Test {
+                    #[diplomat::attr(*, ffi_error)]
+                    a : bool,
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_ffi_error_enum_unsupported() {
+        uitest_lowering_attr! { hir::BackendAttrSupport::default(),
+            #[diplomat::bridge]
+            mod ffi {
+                pub struct Test {
+                    #[diplomat::attr(*, ffi_error)]
+                    a : bool,
                 }
             }
         }

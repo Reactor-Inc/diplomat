@@ -74,6 +74,7 @@ pub(crate) fn attr_support() -> BackendAttrSupport {
     a.generate_mocking_interface = false;
     a.owned_slices = true;
     a.opaque_slices = true;
+    a.utf16_writeables = true;
 
     a
 }
@@ -106,7 +107,7 @@ pub(crate) fn run<'tcx>(
     let mut function_alloc_max: usize = 0;
 
     for (id, ty) in tcx.all_types() {
-        let _guard = errors.set_context_ty(ty.name().as_str().into());
+        let _guard = errors.set_context_ty(ty.name_with_span().into());
 
         if ty.attrs().disable {
             continue;
@@ -114,7 +115,7 @@ pub(crate) fn run<'tcx>(
 
         let type_def = tcx.resolve_type(id);
 
-        let _guard = errors.set_context_ty(type_def.name().as_str().into());
+        let _guard = errors.set_context_ty(type_def.name_with_span().into());
 
         let type_name = formatter.fmt_type_name(id);
 

@@ -17,7 +17,8 @@
 use askama::Template;
 use diplomat_core::hir::{self, StructDef};
 
-use crate::dotnet::r#gen::method::{self, MethodInfo, PropertyInfo};
+use crate::dotnet::r#gen::accessor::PropertyInfo;
+use crate::dotnet::r#gen::method::MethodInfo;
 use crate::dotnet::r#gen::{DotnetPrimitives, ItemGenContext};
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -28,8 +29,19 @@ use crate::dotnet::r#gen::{DotnetPrimitives, ItemGenContext};
 pub(super) struct StructField {
     /// PascalCase C# field name (e.g. `X`, `Y`), already run through the
     /// formatter so the template can drop it in verbatim.
-    name: String,
+    pub(super) name: String,
     field_type: StructFieldType,
+}
+
+impl StructField {
+    /// Raw-layer field type: `bool` becomes the blittable `DiplomatBool` (see its docs).
+    pub(super) fn raw_field_type(&self) -> String {
+        if self.field_type.is_bool() {
+            "DiplomatBool".to_string()
+        } else {
+            self.field_type.to_string()
+        }
+    }
 }
 
 /// Field type that templates render verbatim. Enums use the same C# type
@@ -43,9 +55,7 @@ enum StructFieldType {
 }
 
 impl StructFieldType {
-    /// True only for `bool` — used to gate `[MarshalAs(UnmanagedType.U1)]`
-    /// on the field. Enums never need this; C#'s default marshaling already
-    /// matches Rust's discriminant width.
+    /// True only for `bool`, which `raw_field_type` maps to `DiplomatBool`.
     fn is_bool(&self) -> bool {
         matches!(self, Self::Primitive(p) if p.is_bool())
     }
@@ -82,7 +92,7 @@ struct ImplStructTemplate<'ctx, 'tcx> {
     namespace: &'ctx str,
     fields: Vec<StructField>,
     methods: Vec<MethodInfo<'tcx>>,
-    properties: Vec<PropertyInfo>,
+    properties: Vec<PropertyInfo<'tcx>>,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -113,9 +123,8 @@ impl<'ctx, 'tcx> ItemGenContext<'ctx, 'tcx> {
         display_name: String,
         fields: Vec<StructField>,
         methods: Vec<MethodInfo<'tcx>>,
+        properties: Vec<PropertyInfo<'tcx>>,
     ) -> String {
-        let properties = method::collect_properties(&methods);
-
         ImplStructTemplate {
             name: display_name,
             namespace: self.namespace,

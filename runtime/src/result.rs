@@ -13,16 +13,33 @@ union DiplomatResultValue<T, E> {
 #[repr(C)]
 pub struct DiplomatResult<T, E> {
     value: DiplomatResultValue<T, E>,
+    /// Whether the result is `Ok`.
+    ///
+    /// Note: Mutating this field directly in Rust is unsound, and this field will become
+    /// private in `diplomat-runtime` 1.0 ([#1239](https://github.com/rust-diplomat/diplomat/issues/1239)).
+    /// Prefer calling [`DiplomatResult::is_ok()`] or [`DiplomatResult::is_err()`].
     pub is_ok: bool,
 }
 
-/// A type to represent Option<T> over FFI.
+/// A type to represent `Option<T>` over FFI.
 ///
 /// Used internally to handle `Option<T>` arguments and return types, and needs to be
 /// used explicitly for optional struct fields.
 pub type DiplomatOption<T> = DiplomatResult<T, ()>;
 
 impl<T, E> DiplomatResult<T, E> {
+    /// Returns `true` if the result is `Ok`.
+    #[inline]
+    pub const fn is_ok(&self) -> bool {
+        self.is_ok
+    }
+
+    /// Returns `true` if the result is `Err`.
+    #[inline]
+    pub const fn is_err(&self) -> bool {
+        !self.is_ok
+    }
+
     pub fn as_ref(&self) -> Result<&T, &E> {
         // Safety: we're only accessing the union variants when the flag is correct
         unsafe {

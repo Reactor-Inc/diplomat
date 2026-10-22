@@ -1,4 +1,5 @@
 using System;
+using System.Text;
 using Somelib;
 using Xunit;
 
@@ -33,7 +34,8 @@ public class OpaqueTests
     [Fact]
     public void TryFromUtf8_ValidInputReturnsNonNull()
     {
-        using Opaque? o = Opaque.TryFromUtf8("hi");
+        // `&DiplomatStr` (unvalidated UTF-8) lowers to a zero-copy `byte[]`.
+        using Opaque? o = Opaque.TryFromUtf8(Encoding.UTF8.GetBytes("hi"));
         Assert.NotNull(o);
     }
 
@@ -61,5 +63,12 @@ public class OpaqueTests
         arg.Dispose();
         // Disposed arg must throw, not feed a freed pointer to native (UAF).
         Assert.Throws<ObjectDisposedException>(() => OptionOpaque.OptionOpaqueArgument(arg));
+    }
+
+    [Fact]
+    public void EchoBool_RoundTripsBothDirections()
+    {
+        Assert.True(Opaque.EchoBool(true));
+        Assert.False(Opaque.EchoBool(false));
     }
 }

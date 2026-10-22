@@ -26,7 +26,7 @@ pub struct Method {
     /// Documentation specified on the method
     pub docs: Docs,
     /// The name of the method as initially declared.
-    pub name: IdentBuf,
+    pub name: super::defs::Ident,
     /// The name of the generated `extern "C"` function
     pub abi_name: IdentBuf,
     /// The lifetimes introduced in this method and surrounding impl block.
@@ -56,7 +56,7 @@ pub struct Callback {
     pub param_self: Option<TraitParamSelf>, // this is None for callbacks as method arguments
     pub params: Vec<CallbackParam>,
     pub output: Box<ReturnType<InputOnly>>, // this will be used in Rust (note: can technically be a callback, or void)
-    pub name: Option<IdentBuf>,
+    pub name: Option<super::defs::Ident>,
     pub attrs: Option<Attrs>,
     pub docs: Option<Docs>,
 }
@@ -87,12 +87,38 @@ impl CallbackInstantiationFunctionality for NoCallback {
     }
 }
 
+/// The element type written by a `Write` return.
+#[derive(Copy, Clone, Debug)]
+#[non_exhaustive]
+pub enum WriteType {
+    /// A UTF-8 string (`DiplomatWrite`).
+    Str,
+    /// A UTF-16 string (`DiplomatWrite16`).
+    Str16,
+    /// A primitive array (`DiplomatWriteGeneric<T>`).
+    Primitive(super::PrimitiveType),
+}
+
+impl WriteType {
+    pub(super) fn from_ast(w: crate::ast::WriteType) -> Self {
+        match w {
+            crate::ast::WriteType::Str => WriteType::Str,
+            crate::ast::WriteType::Str16 => WriteType::Str16,
+            crate::ast::WriteType::Primitive(prim) => {
+                WriteType::Primitive(super::PrimitiveType::from_ast(prim))
+            }
+        }
+    }
+}
+
 /// Type that the method returns.
 #[derive(Debug, Clone)]
 #[non_exhaustive]
 pub enum SuccessType<P: super::TyPosition = OutputOnly> {
-    /// Conceptually returns a string, which gets written to the `write: DiplomatWrite` argument
-    Write,
+    /// Conceptually returns a string (`WriteType::Str`, via `DiplomatWrite`, or
+    /// `WriteType::Str16`, via `DiplomatWrite16`) or a primitive array
+    /// (`WriteType::Primitive(prim)`, via `DiplomatWriteGeneric<T>`).
+    Write(WriteType),
     /// A Diplomat type. Some types can be outputs, but not inputs, which is expressed by the `OutType` parameter.
     OutType(Type<P>),
     /// A `()` type in Rust.
@@ -140,17 +166,32 @@ pub struct CallbackParam {
     pub name: Option<IdentBuf>,
 }
 
-impl SuccessType {
+impl<P: crate::hir::TyPosition> SuccessType<P> {
     /// Returns whether the variant is `Write`.
     pub fn is_write(&self) -> bool {
-        matches!(self, SuccessType::Write)
+        matches!(self, SuccessType::Write(..))
+    }
+
+    /// Returns whether the variant is `Write(WriteType::Str16)`.
+    pub fn is_write_16(&self) -> bool {
+        matches!(self, SuccessType::Write(WriteType::Str16))
+    }
+
+    /// If the variant is `Write(WriteType::Primitive(prim))`, returns `Some(prim)`.
+    pub fn write_primitive(&self) -> Option<super::PrimitiveType> {
+        match self {
+            SuccessType::Write(WriteType::Primitive(prim)) => Some(*prim),
+            _ => None,
+        }
     }
 
     /// Returns whether the variant is `Unit`.
     pub fn is_unit(&self) -> bool {
         matches!(self, SuccessType::Unit)
     }
+}
 
+impl SuccessType {
     pub fn as_type(&self) -> Option<&OutType> {
         match self {
             SuccessType::OutType(ty) => Some(ty),
@@ -175,7 +216,7 @@ impl ReturnType {
     pub fn is_ffi_unit(&self) -> bool {
         matches!(
             self,
-            ReturnType::Infallible(SuccessType::Unit | SuccessType::Write)
+            ReturnType::Infallible(SuccessType::Unit | SuccessType::Write(..))
         )
     }
 

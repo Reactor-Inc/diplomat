@@ -1,14 +1,15 @@
 use super::{
     AttributeContext, AttributeValidator, Attrs, Borrow, BoundedLifetime, Callback, CallbackParam,
-    EnumDef, EnumPath, EnumVariant, Everywhere, IdentBuf, InputOnly, IntType, Lifetime,
-    LifetimeEnv, LifetimeLowerer, LookupId, MaybeOwn, Method, Mutability, NonOptional, OpaqueDef,
-    OpaquePath, Optional, OutStructDef, OutStructField, OutStructPath, OutType, Param,
-    ParamLifetimeLowerer, ParamSelf, PrimitiveType, ReturnLifetimeLowerer, ReturnType,
-    ReturnableStructPath, SelfParamLifetimeLowerer, SelfType, Slice, SpecialMethod,
-    SpecialMethodPresence, StructDef, StructField, StructPath, SuccessType, TraitDef,
-    TraitParamSelf, TraitPath, TyPosition, Type, TypeDef, TypeId,
+    EnumDef, EnumPath, EnumVariant, Everywhere, IdentBuf, InputOnly, Lifetime, LifetimeEnv,
+    LifetimeLowerer, LookupId, MaybeOwn, Method, Mutability, NonOptional, OpaqueDef, OpaquePath,
+    Optional, OutStructDef, OutStructField, OutStructPath, OutType, Param, ParamLifetimeLowerer,
+    ParamSelf, PrimitiveType, ReturnLifetimeLowerer, ReturnType, ReturnableStructPath,
+    SelfParamLifetimeLowerer, SelfType, Slice, SpecialMethod, SpecialMethodPresence, StructDef,
+    StructField, StructPath, SuccessType, TraitDef, TraitParamSelf, TraitPath, TyPosition, Type,
+    TypeDef, TypeId, WriteType,
 };
 use crate::ast::attrs::AttrInheritContext;
+use crate::ast::logging::write_report;
 use crate::hir::{Docs, StructPathLike, SymbolId, TypingUseInfo};
 use crate::{ast, Env};
 use core::fmt;
@@ -16,6 +17,7 @@ use std::collections::HashMap;
 use strck::IntoCk;
 
 /// An error from lowering the AST to the HIR.
+/// This provides location information.
 #[derive(Debug)]
 #[non_exhaustive]
 pub enum LoweringError {
@@ -38,26 +40,12 @@ impl fmt::Display for LoweringError {
     }
 }
 
-#[derive(Default, Clone)]
+#[derive(Clone, Default, Debug)]
 pub struct ErrorContext {
+    location: Option<crate::ast::Span>,
+    // Old Lowering Error setup (since the span may not always be present):
     item: String,
     subitem: Option<String>,
-}
-
-impl fmt::Display for ErrorContext {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        if let Some(ref subitem) = self.subitem {
-            write!(f, "{}::{subitem}", self.item)
-        } else {
-            self.item.fmt(f)
-        }
-    }
-}
-
-impl fmt::Debug for ErrorContext {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        fmt::Display::fmt(self, f)
-    }
 }
 
 /// An error store, which one can push errors to. It keeps track of the
@@ -71,9 +59,53 @@ pub struct ErrorStore<'tree> {
     item: &'tree str,
     /// The current sub-item context (methods, etc)
     subitem: Option<&'tree str>,
+    location: Option<crate::ast::Span>,
 }
 
-pub type ErrorAndContext = (ErrorContext, LoweringError);
+#[derive(Debug)]
+pub struct LoweringReport {
+    context: ErrorContext,
+    error: LoweringError,
+}
+
+impl LoweringReport {
+    pub fn get_location(&self) -> String {
+        format!(
+            "{}{}",
+            self.context.item,
+            if let Some(s) = &self.context.subitem {
+                format!("::{}", s)
+            } else {
+                "".into()
+            }
+        )
+    }
+    pub fn ast_report(&self) -> crate::ast::logging::AstReport {
+        let location = self.get_location();
+
+        ast::logging::AstReport::new(
+            format!("Lowering error in {location}"),
+            self.context.location.clone(),
+            format!("{}", self.error),
+            vec![],
+        )
+    }
+}
+
+impl fmt::Display for LoweringReport {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let report = self.ast_report();
+        write_report(&report, f, crate::ast::logging::PrettyPrint::Default).map_err(|e| {
+            panic!(
+                "Could not write lowering report for {}: {e}",
+                self.get_location()
+            );
+        })?;
+        Ok(())
+    }
+}
+
+pub type ErrorAndContext = LoweringReport;
 
 /// Where a type was found
 #[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd)]
@@ -83,14 +115,37 @@ enum TypeLoweringContext {
     Method,
 }
 
+pub(crate) trait ReportContext {
+    fn to_span(&self) -> Option<crate::ast::Span>;
+}
+
+impl ReportContext for ast::Ident {
+    fn to_span(&self) -> Option<crate::ast::Span> {
+        self.span()
+    }
+}
+
+impl ReportContext for super::defs::Ident {
+    fn to_span(&self) -> Option<crate::ast::Span> {
+        self.1.clone()
+    }
+}
+
+impl ReportContext for Option<crate::ast::Span> {
+    fn to_span(&self) -> Option<crate::ast::Span> {
+        self.clone()
+    }
+}
+
 impl<'tree> ErrorStore<'tree> {
     /// Push an error to the error store
     pub fn push(&mut self, error: LoweringError) {
         let context = ErrorContext {
             item: self.item.into(),
             subitem: self.subitem.map(|s| s.into()),
+            location: self.location.clone(),
         };
-        self.errors.push((context, error));
+        self.errors.push(LoweringReport { context, error });
     }
 
     pub(super) fn take_errors(&mut self) -> Vec<ErrorAndContext> {
@@ -101,12 +156,15 @@ impl<'tree> ErrorStore<'tree> {
         self.errors.is_empty()
     }
 
-    pub(super) fn set_item(&mut self, item: &'tree str) {
+    pub(super) fn set_item(&mut self, item: &'tree str, ctx: &dyn ReportContext) {
         self.item = item;
         self.subitem = None;
+        self.location = ctx.to_span();
     }
-    pub(super) fn set_subitem(&mut self, subitem: &'tree str) {
+
+    pub(super) fn set_subitem(&mut self, subitem: &'tree str, ctx: &dyn ReportContext) {
         self.subitem = Some(subitem);
+        self.location = ctx.to_span();
     }
 }
 
@@ -226,11 +284,11 @@ impl<'ast> LoweringContext<'ast> {
 
     fn lower_enum(&mut self, item: ItemAndInfo<'ast, ast::Enum>) -> Result<EnumDef, ()> {
         let ast_enum = item.item;
-        self.errors.set_item(ast_enum.name.as_str());
+        self.errors.set_item(ast_enum.name.as_str(), &ast_enum.name);
         let name = self.lower_ident(&ast_enum.name, "enum name");
         let attrs = self.attr_validator.attr_from_ast(
             &ast_enum.attrs,
-            &item.ty_parent_attrs,
+            item.ty_parent_attrs.clone(),
             &mut self.errors,
         );
 
@@ -238,9 +296,11 @@ impl<'ast> LoweringContext<'ast> {
         let variant_parent_attrs = attrs.for_inheritance(AttrInheritContext::Variant);
         for (ident, discriminant, docs, attrs) in ast_enum.variants.iter() {
             let name = self.lower_ident(ident, "enum variant");
-            let attrs =
-                self.attr_validator
-                    .attr_from_ast(attrs, &variant_parent_attrs, &mut self.errors);
+            let attrs = self.attr_validator.attr_from_ast(
+                attrs,
+                variant_parent_attrs.clone(),
+                &mut self.errors,
+            );
             match (name, &mut variants) {
                 (Ok(name), Ok(variants)) => {
                     let variant = EnumVariant {
@@ -278,7 +338,7 @@ impl<'ast> LoweringContext<'ast> {
                 self.attr_validator.as_ref(),
                 &mut self.errors,
             ),
-            name?,
+            super::defs::Ident::new(name?, ast_enum.name.span()),
             variants?,
             methods,
             attrs,
@@ -296,13 +356,14 @@ impl<'ast> LoweringContext<'ast> {
 
     fn lower_opaque(&mut self, item: ItemAndInfo<'ast, ast::OpaqueType>) -> Result<OpaqueDef, ()> {
         let ast_opaque = item.item;
-        self.errors.set_item(ast_opaque.name.as_str());
+        self.errors
+            .set_item(ast_opaque.name.as_str(), &ast_opaque.name);
         let name = self.lower_ident(&ast_opaque.name, "opaque name");
         let dtor_abi_name = self.lower_ident(&ast_opaque.dtor_abi_name, "opaque dtor abi name");
 
         let attrs = self.attr_validator.attr_from_ast(
             &ast_opaque.attrs,
-            &item.ty_parent_attrs,
+            item.ty_parent_attrs.clone(),
             &mut self.errors,
         );
         let mut special_method_presence = SpecialMethodPresence::default();
@@ -324,7 +385,7 @@ impl<'ast> LoweringContext<'ast> {
                 self.attr_validator.as_ref(),
                 &mut self.errors,
             ),
-            name?,
+            super::defs::Ident::new(name?, ast_opaque.name.span()),
             methods,
             attrs,
             lifetimes?,
@@ -341,24 +402,25 @@ impl<'ast> LoweringContext<'ast> {
 
     fn lower_struct(&mut self, item: ItemAndInfo<'ast, ast::Struct>) -> Result<StructDef, ()> {
         let ast_struct = item.item;
-        self.errors.set_item(ast_struct.name.as_str());
+        self.errors
+            .set_item(ast_struct.name.as_str(), &ast_struct.name);
         let struct_name = self.lower_ident(&ast_struct.name, "struct name")?;
 
         let mut fields = Ok(Vec::with_capacity(ast_struct.fields.len()));
 
         let attrs = self.attr_validator.attr_from_ast(
             &ast_struct.attrs,
-            &item.ty_parent_attrs,
+            item.ty_parent_attrs.clone(),
             &mut self.errors,
         );
         // Only compute fields if the type isn't disabled, otherwise we may encounter forbidden types
         if !attrs.disable {
-            for (name, ty, docs, attrs) in ast_struct.fields.iter() {
-                let name = self.lower_ident(name, "struct field name")?;
+            for (field_name, ty, docs, attrs) in ast_struct.fields.iter() {
+                let name = self.lower_ident(field_name, "struct field name")?;
                 if !ty.is_ffi_safe() {
                     let ffisafe = ty.ffi_safe_version();
                     self.errors.push(LoweringError::Other(format!(
-                        "Found FFI-unsafe type {ty} in struct field {struct_name}.{name}, consider using {ffisafe}",
+                        "{ty} is FFI-unsafe, consider using {ffisafe}"
                     )));
                 }
                 let ty = self.lower_type::<Everywhere>(
@@ -370,7 +432,7 @@ impl<'ast> LoweringContext<'ast> {
 
                 let field_attrs =
                     self.attr_validator
-                        .attr_from_ast(attrs, &Attrs::default(), &mut self.errors);
+                        .attr_from_ast(attrs, Attrs::default(), &mut self.errors);
 
                 self.attr_validator.validate(
                     &field_attrs,
@@ -418,7 +480,7 @@ impl<'ast> LoweringContext<'ast> {
                 self.attr_validator.as_ref(),
                 &mut self.errors,
             ),
-            struct_name,
+            super::defs::Ident::new(struct_name, ast_struct.name.span()),
             fields?,
             methods,
             attrs,
@@ -436,12 +498,13 @@ impl<'ast> LoweringContext<'ast> {
 
     fn lower_trait(&mut self, item: ItemAndInfo<'ast, ast::Trait>) -> Result<TraitDef, ()> {
         let ast_trait = item.item;
-        self.errors.set_item(ast_trait.name.as_str());
+        self.errors
+            .set_item(ast_trait.name.as_str(), &ast_trait.name);
         let trait_name = self.lower_ident(&ast_trait.name, "trait name")?;
 
         let attrs = self.attr_validator.attr_from_ast(
             &ast_trait.attrs,
-            &item.ty_parent_attrs,
+            item.ty_parent_attrs.clone(),
             &mut self.errors,
         );
 
@@ -463,7 +526,7 @@ impl<'ast> LoweringContext<'ast> {
             for ast_trait_method in ast_trait.methods.iter() {
                 let trait_method_attrs = self.attr_validator.attr_from_ast(
                     &ast_trait_method.attrs,
-                    &attrs,
+                    attrs.clone(),
                     &mut self.errors,
                 );
 
@@ -482,7 +545,7 @@ impl<'ast> LoweringContext<'ast> {
                 self.attr_validator.as_ref(),
                 &mut self.errors,
             ),
-            trait_name,
+            super::defs::Ident::new(trait_name, ast_trait.name.span()),
             fcts,
             attrs,
             lifetimes?,
@@ -499,7 +562,8 @@ impl<'ast> LoweringContext<'ast> {
         in_path: &ast::Path,
         parent_trait_attrs: &Attrs,
     ) -> Result<Callback, ()> {
-        self.errors.set_subitem(ast_trait_method.name.as_str());
+        self.errors
+            .set_subitem(ast_trait_method.name.as_str(), &ast_trait_method.name);
         let name = ast_trait_method.name.clone();
         let self_param_ltl = SelfParamLifetimeLowerer::new(&ast_trait_method.lifetimes, self)?;
         let (param_self, mut param_ltl) =
@@ -522,7 +586,7 @@ impl<'ast> LoweringContext<'ast> {
 
         let attrs = self.attr_validator.attr_from_ast(
             &ast_trait_method.attrs,
-            parent_trait_attrs,
+            parent_trait_attrs.clone(),
             &mut self.errors,
         );
 
@@ -530,7 +594,10 @@ impl<'ast> LoweringContext<'ast> {
             param_self,
             params,
             output: Box::new(return_type),
-            name: Some(self.lower_ident(&name, "trait name")?),
+            name: Some(super::defs::Ident::new(
+                self.lower_ident(&name, "trait name")?,
+                ast_trait_method.name.span(),
+            )),
             attrs: Some(attrs),
             docs: Some(Docs::from_ast(
                 &ast_trait_method.docs,
@@ -544,21 +611,22 @@ impl<'ast> LoweringContext<'ast> {
         &mut self,
         ast_function: ItemAndInfo<'ast, ast::Function>,
     ) -> Result<Method, ()> {
-        self.errors.set_item(ast_function.item.name.as_str());
+        self.errors
+            .set_item(ast_function.item.name.as_str(), &ast_function.item.name);
         let name = ast_function.item.name.clone();
         let param_ltl = SelfParamLifetimeLowerer::no_self_ref(SelfParamLifetimeLowerer::new(
             &ast_function.item.lifetimes,
             self,
         )?);
 
-        let (ast_params, takes_write) = match ast_function.item.params.split_last() {
-            Some((last, remaining)) if last.is_write() => (remaining, true),
-            _ => (&ast_function.item.params[..], false),
+        let (ast_params, write_type) = match ast_function.item.params.split_last() {
+            Some((last, remaining)) if let Some(w) = last.write_type() => (remaining, Some(w)),
+            _ => (&ast_function.item.params[..], None),
         };
 
         let attrs = self.attr_validator.attr_from_ast(
             &ast_function.item.attrs,
-            &ast_function.ty_parent_attrs,
+            ast_function.ty_parent_attrs.clone(),
             &mut self.errors,
         );
 
@@ -575,7 +643,7 @@ impl<'ast> LoweringContext<'ast> {
 
             let (return_type, lifetime_env) = self.lower_return_type(
                 ast_function.item.output_type.as_ref(),
-                takes_write,
+                write_type,
                 return_ltl,
                 ast_function.in_path,
             )?;
@@ -594,7 +662,10 @@ impl<'ast> LoweringContext<'ast> {
                 self.attr_validator.as_ref(),
                 &mut self.errors,
             ),
-            name: self.lower_ident(&name, "function name")?,
+            name: super::defs::Ident::new(
+                self.lower_ident(&name, "function name")?,
+                ast_function.item.name.span(),
+            ),
             abi_name: self.lower_ident(&ast_function.item.abi_name, "function abi name")?,
             lifetime_env,
             param_self: None,
@@ -614,12 +685,13 @@ impl<'ast> LoweringContext<'ast> {
         item: ItemAndInfo<'ast, ast::Struct>,
     ) -> Result<OutStructDef, ()> {
         let ast_out_struct = item.item;
-        self.errors.set_item(ast_out_struct.name.as_str());
+        self.errors
+            .set_item(ast_out_struct.name.as_str(), &ast_out_struct.name);
         let name = self.lower_ident(&ast_out_struct.name, "out-struct name");
 
         let attrs = self.attr_validator.attr_from_ast(
             &ast_out_struct.attrs,
-            &item.ty_parent_attrs,
+            item.ty_parent_attrs.clone(),
             &mut self.errors,
         );
         let fields = {
@@ -647,7 +719,7 @@ impl<'ast> LoweringContext<'ast> {
                             ty,
                             attrs: self.attr_validator.attr_from_ast(
                                 attrs,
-                                &Attrs::default(),
+                                Attrs::default(),
                                 &mut self.errors,
                             ),
                         }),
@@ -677,7 +749,7 @@ impl<'ast> LoweringContext<'ast> {
                 self.attr_validator.as_ref(),
                 &mut self.errors,
             ),
-            name?,
+            super::defs::Ident::new(name?, ast_out_struct.name.span()),
             fields?,
             methods,
             attrs,
@@ -705,9 +777,9 @@ impl<'ast> LoweringContext<'ast> {
     ) -> Result<Method, ()> {
         let name = self.lower_ident(&method.name, "method name");
 
-        let (ast_params, takes_write) = match method.params.split_last() {
-            Some((last, remaining)) if last.is_write() => (remaining, true),
-            _ => (&method.params[..], false),
+        let (ast_params, write_type) = match method.params.split_last() {
+            Some((last, remaining)) if let Some(w) = last.write_type() => (remaining, Some(w)),
+            _ => (&method.params[..], None),
         };
 
         let self_param_ltl = SelfParamLifetimeLowerer::new(&method.lifetime_env, self)?;
@@ -722,18 +794,14 @@ impl<'ast> LoweringContext<'ast> {
 
         let (params, return_ltl) = self.lower_many_params(ast_params, param_ltl, in_path)?;
 
-        let (output, lifetime_env) = self.lower_return_type(
-            method.return_type.as_ref(),
-            takes_write,
-            return_ltl,
-            in_path,
-        )?;
+        let (output, lifetime_env) =
+            self.lower_return_type(method.return_type.as_ref(), write_type, return_ltl, in_path)?;
 
         let abi_name = self.lower_ident(&method.abi_name, "method abi name")?;
 
         let mut hir_method = Method {
             docs: Docs::from_ast(&method.docs, self.attr_validator.as_ref(), &mut self.errors),
-            name: name?,
+            name: super::defs::Ident::new(name?, method.name.span()),
             abi_name,
             lifetime_env,
             param_self,
@@ -828,10 +896,10 @@ impl<'ast> LoweringContext<'ast> {
 
         let mut has_unnamed_constructor = false;
         for method in ast_methods {
-            self.errors.set_subitem(method.name.as_str());
+            self.errors.set_subitem(method.name.as_str(), &method.name);
             let attrs = self.attr_validator.attr_from_ast(
                 &method.attrs,
-                method_parent_attrs,
+                method_parent_attrs.clone(),
                 &mut self.errors,
             );
             if attrs.disable {
@@ -1136,7 +1204,7 @@ impl<'ast> LoweringContext<'ast> {
                 ));
                 Err(())
             }
-            ast::TypeName::Write => {
+            ast::TypeName::Write(..) => {
                 self.errors.push(LoweringError::Other(
                     "DiplomatWrite can only appear as the last parameter of a method".into(),
                 ));
@@ -1198,7 +1266,7 @@ impl<'ast> LoweringContext<'ast> {
                     PrimitiveType::from_ast(*prim),
                 )))
             }
-            ast::TypeName::CustomTypeSlice(lm, type_name) => {
+            ast::TypeName::CustomTypeSlice(lm, type_name, _stdlib) => {
                 let new_lifetime = lm
                     .as_ref()
                     .map(|(lt, m)| Borrow::new(ltl.lower_lifetime(lt), *m));
@@ -1225,6 +1293,10 @@ impl<'ast> LoweringContext<'ast> {
                     Type::Struct(st) => {
                         self.usage_get_or_insert(st.tcx_id.into()).sliced = true;
                         Ok(Type::Slice(Slice::Struct(new_lifetime.into(), st)))
+                    }
+                    Type::Enum(enm) => {
+                        self.usage_get_or_insert(enm.tcx_id.into()).sliced = true;
+                        Ok(Type::Slice(Slice::Enum(new_lifetime.into(), enm)))
                     }
                     Type::Opaque(op) => {
                         if let Some(lt) = new_lifetime {
@@ -1557,25 +1629,20 @@ impl<'ast> LoweringContext<'ast> {
                 ));
                 Err(())
             }
-            ast::TypeName::Write => {
+            ast::TypeName::Write(..) => {
                 self.errors.push(LoweringError::Other(
                     "DiplomatWrite can only appear as the last parameter of a method".into(),
                 ));
                 Err(())
             }
-            // Plain top-level method returns only: out-struct fields and
-            // callbacks keep the old rejection, and `Result`/`Option` inners
-            // are excluded because the macro leaves the ok arm as a raw
-            // `Box<[u8]>` inside `DiplomatResult` — a fat pointer with no
-            // guaranteed layout, unlike the `DiplomatOwnedSlice<u8>` repr(C)
-            // shape an infallible return is converted to.
+            // Method returns only: out-struct fields and callbacks keep the old
+            // rejection. `Result`/`Option` method returns may take this path
+            // when the call site passes `in_result_option = false` — the macro
+            // converts those payloads to repr(C) `DiplomatOwnedSlice<u8>`.
             ast::TypeName::PrimitiveSlice(None, prim, _stdlib)
                 if context == TypeLoweringContext::Method
                     && !in_result_option
-                    && matches!(
-                        PrimitiveType::from_ast(*prim),
-                        PrimitiveType::Byte | PrimitiveType::Int(IntType::U8)
-                    ) =>
+                    && ty.is_owned_byte_slice() =>
             {
                 if !self
                     .attr_validator
@@ -1596,7 +1663,7 @@ impl<'ast> LoweringContext<'ast> {
             ast::TypeName::PrimitiveSlice(None, _, _stdlib)
             | ast::TypeName::StrReference(None, _, _stdlib) => {
                 self.errors.push(LoweringError::Other(
-                    "Owned slices cannot be returned, except for top-level `Box<[u8]>` method returns on backends supporting `owned_byte_slice_returns`.".into(),
+                    "Owned slices cannot be returned, except for top-level method-return `Box<[u8]>` (including as a `Result`/`Option` payload) on backends supporting `owned_byte_slice_returns`.".into(),
                 ));
                 Err(())
             }
@@ -1618,7 +1685,7 @@ impl<'ast> LoweringContext<'ast> {
                     PrimitiveType::from_ast(*prim),
                 )))
             }
-            ast::TypeName::CustomTypeSlice(ltmt, type_name) => {
+            ast::TypeName::CustomTypeSlice(ltmt, type_name, _stdlib) => {
                 let new_lifetime = ltmt
                     .as_ref()
                     .map(|(lt, m)| Borrow::new(ltl.lower_lifetime(lt), *m));
@@ -1646,6 +1713,10 @@ impl<'ast> LoweringContext<'ast> {
                         self.usage_get_or_insert(st.id().into()).sliced = true;
                         Ok(Type::Slice(Slice::Struct(new_lifetime.into(), st)))
                     }
+                    Type::Enum(enm) => {
+                        self.usage_get_or_insert(enm.tcx_id.into()).sliced = true;
+                        Ok(Type::Slice(Slice::Enum(new_lifetime.into(), enm)))
+                    }
                     Type::Opaque(..) => {
                         self.errors.push(LoweringError::Other(
                             "Opaque slices are currently disallowed as an output type.".to_string(),
@@ -1654,7 +1725,7 @@ impl<'ast> LoweringContext<'ast> {
                     }
                     _ => {
                         self.errors.push(LoweringError::Other(format!(
-                            "Cannot make a slice from type {type_name}. Only abi_compatible structs and borrowed opaques are allowed."
+                            "Cannot make a slice from type {type_name}. Only abi_compatible structs, borrowed opaques, and enums are allowed."
                         )));
                         Err(())
                     }
@@ -1715,7 +1786,7 @@ impl<'ast> LoweringContext<'ast> {
 
                     let attrs = self.attr_validator.attr_from_ast(
                         &self_param.attrs,
-                        &Attrs::default(),
+                        Attrs::default(),
                         &mut self.errors,
                     );
 
@@ -1778,7 +1849,7 @@ impl<'ast> LoweringContext<'ast> {
 
                     let attrs = self.attr_validator.attr_from_ast(
                         &self_param.attrs,
-                        &Attrs::default(),
+                        Attrs::default(),
                         &mut self.errors,
                     );
 
@@ -1810,7 +1881,7 @@ impl<'ast> LoweringContext<'ast> {
 
                 let attrs = self.attr_validator.attr_from_ast(
                     &self_param.attrs,
-                    &Attrs::default(),
+                    Attrs::default(),
                     &mut self.errors,
                 );
 
@@ -1886,7 +1957,7 @@ impl<'ast> LoweringContext<'ast> {
         // No parent attrs because parameters do not have a strictly clear parent.
         let attrs =
             self.attr_validator
-                .attr_from_ast(&param.attrs, &Attrs::default(), &mut self.errors);
+                .attr_from_ast(&param.attrs, Attrs::default(), &mut self.errors);
 
         self.attr_validator
             .validate(&attrs, AttributeContext::Param, &mut self.errors);
@@ -2015,12 +2086,26 @@ impl<'ast> LoweringContext<'ast> {
     fn lower_return_type(
         &mut self,
         return_type: Option<&ast::TypeName>,
-        takes_write: bool,
+        write_type: Option<ast::WriteType>,
         mut return_ltl: ReturnLifetimeLowerer<'_>,
         in_path: &ast::Path,
     ) -> Result<(ReturnType, LifetimeEnv), ()> {
-        let write_or_unit = if takes_write {
-            SuccessType::Write
+        if matches!(write_type, Some(ast::WriteType::Primitive(_)))
+            && !self.attr_validator.attrs_supported().generic_writeables
+        {
+            self.errors.push(LoweringError::Other(
+                "DiplomatWriteGeneric is not supported in this backend. Try #[diplomat::cfg(supports = generic_writeables)]".into(),
+            ));
+        }
+        if matches!(write_type, Some(ast::WriteType::Str16))
+            && !self.attr_validator.attrs_supported().utf16_writeables
+        {
+            self.errors.push(LoweringError::Other(
+                "DiplomatWrite16 is not supported in this backend. Try #[diplomat::cfg(supports = utf16_writeables)]".into(),
+            ));
+        }
+        let write_or_unit = if let Some(w) = write_type {
+            SuccessType::Write(WriteType::from_ast(w))
         } else {
             SuccessType::Unit
         };
@@ -2035,7 +2120,9 @@ impl<'ast> LoweringContext<'ast> {
                             &mut return_ltl,
                             in_path,
                             TypeLoweringContext::Method,
-                            true,
+                            // `Box<[u8]>` Ok payloads take the plain method-return
+                            // path — the macro converts them to `DiplomatOwnedSlice<u8>`.
+                            !ty.is_owned_byte_slice(),
                         )
                         .map(SuccessType::OutType),
                 };
@@ -2091,12 +2178,15 @@ impl<'ast> LoweringContext<'ast> {
                     .map(ReturnType::Infallible),
                 ast::TypeName::Unit => Ok(ReturnType::Nullable(write_or_unit)),
                 _ => {
+                    // `Option<Box<[u8]>>` uses the same FFI-safe owned-slice
+                    // payload path as a bare/`Result` return (macro converts).
+                    let in_result_option = !value_ty.is_owned_byte_slice();
                     let t = self.lower_out_type(
                         value_ty,
                         &mut return_ltl,
                         in_path,
                         TypeLoweringContext::Method,
-                        true,
+                        in_result_option,
                     );
                     if let Ok(t) = &t {
                         if let Some(i) = t.id() {
@@ -2173,7 +2263,7 @@ impl<'ast> LoweringContext<'ast> {
                 ast::TypeName::Box(t) | ast::TypeName::Reference(_, _, t) => {
                     match &**t {
                         ast::TypeName::Named(t) | ast::TypeName::SelfType(t) => {
-                            let ty = t.resolve(&t.path, self.env);
+                            let ty = t.resolve(in_path, self.env);
                             if let ast::CustomType::Opaque(..) = ty {
                                 if *stdlib == ast::StdlibOrDiplomat::Diplomat {
                                     self.errors.push(LoweringError::Other("found DiplomatOption<T>, where T is opaque. Please use Option<&T> (DiplomatOption is for primitives, structs, and enums)".to_string()));
