@@ -1,0 +1,13 @@
+---
+source: tool/src/nanobind/mod.rs
+expression: out
+---
+PyType_Slot mylib_Lister_slots[] = {
+    {Py_tp_free, (void *)mylib::Lister::operator delete },
+    {Py_tp_dealloc, (void *)diplomat_tp_dealloc},
+    {0, nullptr}};
+
+nb::class_<mylib::Lister> opaque(mod, "Lister", nb::type_slots(mylib_Lister_slots));
+opaque
+    .def("list", &mylib::Lister::list, "source"_a, "filter"_a= nb::none(), nb::kw_only(), "count"_a, "exclude"_a= nb::none())
+    .def("trailing", &mylib::Lister::trailing, "first"_a= nb::none(), "second"_a= nb::none());

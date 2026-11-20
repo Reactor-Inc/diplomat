@@ -73,6 +73,63 @@ impl<'a, P: hir::TyPosition> NamedType<'a, P> {
     }
 }
 
+/// A method parameter as `method_params.cpp.jinja` renders it.
+pub(super) trait NanobindParam {
+    fn input_ty(&self) -> &hir::Type<hir::InputOnly>;
+    fn declared_default(&self) -> Option<&hir::DefaultArgValue>;
+
+    /// Whether Python callers may omit the argument: it has a declared default, or it is
+    /// optional and the template defaults it to `None`.
+    fn has_default(&self) -> bool {
+        self.declared_default().is_some()
+            || match self.input_ty() {
+                Type::DiplomatOption(_) => true,
+                Type::Opaque(path) => path.is_optional(),
+                _ => false,
+            }
+    }
+}
+
+impl NanobindParam for hir::Param {
+    fn input_ty(&self) -> &hir::Type<hir::InputOnly> {
+        &self.ty
+    }
+
+    fn declared_default(&self) -> Option<&hir::DefaultArgValue> {
+        self.default_value()
+    }
+}
+
+impl NanobindParam for NamedType<'_, hir::InputOnly> {
+    fn input_ty(&self) -> &hir::Type<hir::InputOnly> {
+        self.ty
+    }
+
+    fn declared_default(&self) -> Option<&hir::DefaultArgValue> {
+        self.default_value()
+    }
+}
+
+/// The index of the first parameter to make keyword-only: the first one without a default
+/// that follows one with a default.
+///
+/// Python forbids a positional parameter without a default after one with a default, so
+/// nanobind's signature (and every stub generated from it) would be invalid. Marking the rest
+/// keyword-only keeps every default and every keyword call.
+pub(super) fn keyword_only_from<'p, P: NanobindParam + 'p>(
+    params: impl IntoIterator<Item = &'p P>,
+) -> Option<usize> {
+    let mut seen_default = false;
+    for (index, param) in params.into_iter().enumerate() {
+        if param.has_default() {
+            seen_default = true;
+        } else if seen_default {
+            return Some(index);
+        }
+    }
+    None
+}
+
 /// An enum variant's name plus its (optional, pre-escaped) docstring.
 pub(super) struct EnumVariantInfo<'a> {
     pub(super) name: Cow<'a, str>,
