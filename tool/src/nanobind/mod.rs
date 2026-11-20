@@ -740,6 +740,11 @@ mod test {
                 ),
                 "{out}"
             );
+            // A `&str` parameter wraps the return in a second `Result`.
+            assert!(
+                out.contains(r#".def_static("maybe_named", nullable_return_wrap("#),
+                "{out}"
+            );
             assert!(
                 out.contains("nullable_return<decltype(mylib::Item::maybe_static())>::wrap("),
                 "{out}"
@@ -778,6 +783,10 @@ mod test {
                     }
 
                     pub fn maybe_self<'a>(&'a self) -> Option<&'a Item> {
+                        todo!()
+                    }
+
+                    pub fn maybe_named(name: &str) -> Option<Box<Item>> {
                         todo!()
                     }
 

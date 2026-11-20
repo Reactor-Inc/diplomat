@@ -1254,6 +1254,12 @@ class OptionOpaque:
     def new_fallible(i: int) -> OptionOpaque | None: ...
 
     @staticmethod
+    def new_from_str(s: str) -> OptionOpaque | None:
+        """
+        Takes a `&str`, whose validation wraps the return in a second `Result`.
+        """
+
+    @staticmethod
     def new_none() -> OptionOpaque | None: ...
 
     @staticmethod

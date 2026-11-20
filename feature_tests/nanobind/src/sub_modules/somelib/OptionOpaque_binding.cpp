@@ -26,6 +26,7 @@ void add_OptionOpaque_binding(nb::module_ mod) {
         .def("assert_integer", &somelib::OptionOpaque::assert_integer, "i"_a)
         .def_static("new", nullable_return_wrap(std::move(maybe_op_unwrap(&somelib::OptionOpaque::new_))), "i"_a)
         .def_static("new_fallible", nullable_return_wrap(std::move(maybe_op_unwrap(&somelib::OptionOpaque::new_fallible))), "i"_a)
+        .def_static("new_from_str", nullable_return_wrap(std::move(maybe_op_unwrap(&somelib::OptionOpaque::new_from_str))), "s"_a, "Takes a `&str`, whose validation wraps the return in a second `Result`.")
         .def_static("new_none", nullable_return_wrap(std::move(maybe_op_unwrap(&somelib::OptionOpaque::new_none))))
         .def_static("new_struct", &somelib::OptionOpaque::new_struct)
         .def_static("new_struct_nones", &somelib::OptionOpaque::new_struct_nones)

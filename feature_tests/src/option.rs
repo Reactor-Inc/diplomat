@@ -112,6 +112,16 @@ pub mod ffi {
             }
         }
 
+        /// Takes a `&str`, whose validation wraps the return in a second `Result`.
+        #[diplomat::cfg(nanobind)]
+        pub fn new_from_str(s: &str) -> Result<Option<Box<OptionOpaque>>, ()> {
+            match s.parse::<i32>() {
+                Ok(i) if i > 0 => Ok(Some(Box::new(OptionOpaque(i)))),
+                Ok(_) => Ok(None),
+                Err(_) => Err(()),
+            }
+        }
+
         #[diplomat::cfg(nanobind)]
         #[diplomat::attr(auto, getter)]
         pub fn none_static() -> Option<Box<OptionOpaque>> {

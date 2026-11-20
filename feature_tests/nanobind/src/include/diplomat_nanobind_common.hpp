@@ -457,7 +457,7 @@ namespace nanobind::detail {
 }
 
 // Maps a return type to the one marking its opaque as nullable: R to nullable<R>, and result<T, E> to
-// result<nullable<T>, E>.
+// result<nullable<T>, E>. Results nest when a fallible function also validates a string parameter.
 template<typename R>
 struct nullable_return {
     using type = nullable<R>;
@@ -466,12 +466,13 @@ struct nullable_return {
 
 template<typename T, typename E>
 struct nullable_return<somelib::diplomat::result<T, E>> {
-    using type = somelib::diplomat::result<nullable<T>, E>;
+    using Inner = typename nullable_return<T>::type;
+    using type = somelib::diplomat::result<Inner, E>;
     static type wrap(somelib::diplomat::result<T, E>&& r) {
         if (r.is_err()) {
-            return r.replace_ok(nullable<T>{});
+            return r.replace_ok(Inner{});
         }
-        return somelib::diplomat::Ok<nullable<T>>(nullable<T>{std::move(r).ok().value()});
+        return somelib::diplomat::Ok<Inner>(nullable_return<T>::wrap(std::move(r).ok().value()));
     }
 };
 

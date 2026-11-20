@@ -78,6 +78,7 @@ def test_optional_opaque_returns_are_typed_optional():
     assert _return_type(somelib.OptionOpaque.returns_none_self).endswith(".OptionOpaque | None")
     # Inside a Result, only the success is optional; the error raises.
     assert _return_type(somelib.OptionOpaque.new_fallible).endswith(".OptionOpaque | None")
+    assert _return_type(somelib.OptionOpaque.new_from_str).endswith(".OptionOpaque | None")
     # A non-optional opaque stays as is.
     assert _return_type(somelib.ResultOpaque.new_failing_foo).endswith("ResultOpaque")
     assert not _return_type(somelib.ResultOpaque.new_failing_foo).endswith("| None")
@@ -89,6 +90,10 @@ def test_optional_opaque_returns():
     with pytest.raises(Exception):
         somelib.OptionOpaque.new_fallible(-1)
     assert somelib.OptionOpaque.none_static is None
+    somelib.OptionOpaque.new_from_str("5").assert_integer(5)
+    assert somelib.OptionOpaque.new_from_str("0") is None
+    with pytest.raises(Exception):
+        somelib.OptionOpaque.new_from_str("five")
     o = somelib.OptionOpaque.new(3)
     assert o.returns_none_self() is None
     assert o.returns_some_self() is o
