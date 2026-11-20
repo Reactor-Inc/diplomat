@@ -555,6 +555,46 @@ mod test {
     }
 
     #[test]
+    fn test_keyword_only_after_default() {
+        let callback = |_, out: String| {
+            // Python forbids `count` without a default after `filter=None`, so it and every
+            // later parameter become keyword-only.
+            assert!(
+                out.contains(
+                    r#""filter"_a= nb::none(), nb::kw_only(), "count"_a, "exclude"_a= nb::none()"#
+                ),
+                "{out}"
+            );
+            assert!(
+                out.contains(r#""first"_a= nb::none(), "second"_a= nb::none()"#),
+                "{out}"
+            );
+            insta::assert_snapshot!(out);
+        };
+        test_gen! {
+            Opaque, gen_opaque_def, [], callback,
+            {
+            #[diplomat::bridge]
+            #[diplomat::attr(auto, namespace = "mylib")]
+            mod ffi {
+                #[diplomat::opaque]
+                struct Lister;
+
+                impl Lister {
+                    pub fn list(&self, source: &DiplomatStr, filter: DiplomatOption<i32>, count: i32, exclude: DiplomatOption<bool>) {
+                        todo!()
+                    }
+
+                    pub fn trailing(&self, first: DiplomatOption<i32>, second: DiplomatOption<i32>) {
+                        todo!()
+                    }
+                }
+            }
+            }
+        };
+    }
+
+    #[test]
     fn test_enum_gen() {
         let callback = |_, out| {
             insta::assert_snapshot!(out);

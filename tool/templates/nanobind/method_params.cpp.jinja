@@ -1,5 +1,9 @@
 {% macro params(p, lifetime_args, is_method=false) %}
+{%- let keyword_only_from = crate::nanobind::gen::keyword_only_from(p.iter()) -%}
 {%- for param in &p -%}
+    {%- if keyword_only_from == Some(*loop.index0) -%}
+    , nb::kw_only()
+    {%- endif -%}
     , "{{param.name}}"_a {%- if let Some(v) = param.default_value() -%} =
     {%- match v -%}
     {%- when hir::DefaultArgValue::Bool(b) -%}
