@@ -14,7 +14,9 @@ nb::overload_cast<{% for p in &overload_params -%} {{- p.type_name -}} {%- if !l
 &{{- method_name_cpp_inner(method_name) -}}
 {%- if m.overloads.len() > 0 -%} {%- if is_const %}, nb::const_ {%- endif -%} ) {%- endif -%}
 {%- endmacro -%}
-{%- macro method_name_cpp(pre_call="std::move(maybe_op_unwrap(", post_call="))") -%}
+{#- `wraps_function`: the caller is a function (pointer) rather than a call expression, so a nullable return can be
+    marked by wrapping it. -#}
+{%- macro method_name_cpp(pre_call="std::move(maybe_op_unwrap(", post_call="))", wraps_function=true) -%}
     {%- decl success_owned_op -%}
     {%- if let hir::SuccessType::OutType(hir::Type::Opaque(op)) = m.method.output.success_type() -%}
     {%- let success_owned_op = op.is_owned() -%}
@@ -29,6 +31,10 @@ nb::overload_cast<{% for p in &overload_params -%} {{- p.type_name -}} {%- if !l
     {%- let failure_owned_op = false -%}
     {%- endif -%}
     
+    {%- if wraps_function && m.nullable_return -%}
+    nullable_return_wrap(
+    {%- endif -%}
+
     {%- if m.has_op_cb -%}
     swap_lvalue_wrap(
     {%- endif -%}
@@ -44,6 +50,10 @@ nb::overload_cast<{% for p in &overload_params -%} {{- p.type_name -}} {%- if !l
     {%- endif -%}
     
     {%- if m.has_op_cb -%}
+    )
+    {%- endif -%}
+
+    {%- if wraps_function && m.nullable_return -%}
     )
     {%- endif -%}
 

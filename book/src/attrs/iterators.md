@@ -31,6 +31,32 @@ mod ffi {
 }
 ```
 
+### Fallible iterators
+
+(Fallible iterators {{get_supports("fallible_iterators")}})
+
+In languages that raise exceptions, `next` may return `Result<Option<Box<T>>, E>` for an opaque `T`: `Ok(Some(..))` yields an item, `Ok(None)` ends the iteration, and `Err(..)` raises the error from the iteration instead of ending it silently. Use this when producing the next item can fail, such as reading a stream. Gate the `iterator` attribute on `supports = fallible_iterators` so other backends keep `next` as a plain method returning the `Result`.
+
+```rust
+#[diplomat::bridge]
+mod ffi {
+    #[diplomat::opaque]
+    struct Record;
+    #[diplomat::opaque]
+    struct ReadError;
+
+    #[diplomat::opaque]
+    struct RecordReader;
+
+    impl RecordReader {
+        #[diplomat::attr(supports = fallible_iterators, iterator)]
+        pub fn next(&mut self) -> Result<Option<Box<Record>>, Box<ReadError>> {
+            todo!()
+        }
+    }
+}
+```
+
 ## Marking a type as an iterable
 
 

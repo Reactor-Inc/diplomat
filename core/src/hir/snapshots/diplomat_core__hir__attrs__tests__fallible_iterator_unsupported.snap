@@ -1,0 +1,6 @@
+---
+source: core/src/hir/attrs.rs
+expression: output
+---
+Diplomat error: Lowering error in ItemIterator::next
+> Iterator method returning a Result is not supported in this backend. Try #[diplomat::cfg(supports = fallible_iterators)]

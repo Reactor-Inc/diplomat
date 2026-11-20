@@ -1,0 +1,27 @@
+#pragma once
+
+#include <memory>
+#include <nanobind/nanobind.h>
+{% for e in entries %}
+#include "{{e.include_path}}"
+{%- endfor %}
+
+namespace {{lib_name}} {
+
+// The Python exception class an error is raised as: `Exception`, unless the error type names
+// another with `#[diplomat::attr(nanobind, exception = "...")]`.
+template<typename E>
+struct python_exception {
+    static PyObject* type() { return PyExc_Exception; }
+};
+
+// Opaque errors are returned boxed.
+template<typename E>
+struct python_exception<std::unique_ptr<E>> : python_exception<E> {};
+{% for e in entries %}
+template<>
+struct python_exception<{{e.type_name}}> {
+    static PyObject* type() { return PyExc_{{e.exception}}; }
+};
+{% endfor %}
+}

@@ -80,6 +80,11 @@ pub struct Attrs {
     /// From #[diplomat::attr()]. Mark an error type as representing a precondition violation (Error in Dart).
     pub precondition_violation: bool,
 
+    /// From `#[diplomat::attr(..., exception = "Name")]`, found on types used as errors: the target language's
+    /// exception class to raise this error as, for backends that turn errors into exceptions
+    /// (see [`BackendAttrSupport::exceptions`]). The name is the backend's to interpret.
+    pub exception: Option<String>,
+
     /// Information on if a type declaration/impl block has custom bindings, and if so, what kind.
     pub custom_extra_code: HashMap<IncludeLocation, IncludeSource>,
 
@@ -365,6 +370,9 @@ pub struct SpecialMethodPresence {
     pub optional_comparator: bool,
     /// If it is an iterator, the type it iterates over
     pub iterator: Option<SuccessType>,
+    /// If it is an iterator, whether its `next` returns a `Result` whose error is raised from the
+    /// iteration (see [`BackendAttrSupport::fallible_iterators`])
+    pub fallible_iterator: bool,
     /// If it is an iterable, the iterator type it returns (*not* the type it iterates over,
     /// perform lookup on that type to access)
     pub iterable: Option<OpaqueId>,
@@ -631,6 +639,21 @@ impl Attrs {
                         "precondition_violation" => {
                             this.precondition_violation = true;
                         }
+                        "exception" => {
+                            if !support.exceptions {
+                                maybe_error_unsupported(auto_found, "exception", backend, errors);
+                                continue;
+                            }
+                            match StandardAttribute::from_meta(&attr.meta) {
+                                Ok(StandardAttribute::String(s)) if !s.is_empty() => {
+                                    this.exception = Some(s)
+                                }
+                                _ => errors.push(LoweringError::other(
+                                    "`exception` must have a single string parameter naming the exception class"
+                                        .into(),
+                                )),
+                            }
+                        }
                         "custom_extra_code" => {
                             let (location, source) =
                                 IncludeLocation::pair_from_meta(&attr.meta, errors);
@@ -786,6 +809,7 @@ impl Attrs {
             mut_struct_ref,
             tuple,
             precondition_violation: _,
+            exception,
             custom_extra_code,
             default_value,
         } = &self;
@@ -1013,6 +1037,27 @@ impl Attrs {
 
                             special_method_presence.iterator =
                                 Some(SuccessType::OutType(crate::hir::OutType::Opaque(o)));
+                        } else if let ReturnType::Fallible(
+                            SuccessType::OutType(crate::hir::OutType::Opaque(
+                                ref o @ crate::hir::OpaquePath {
+                                    optional: crate::hir::Optional(true),
+                                    ..
+                                },
+                            )),
+                            Some(_),
+                        ) = method.output
+                        {
+                            if !validator.attrs_supported().fallible_iterators {
+                                errors.push(LoweringError::other(
+                                    "Iterator method returning a Result is not supported in this backend. Try #[diplomat::cfg(supports = fallible_iterators)]".into(),
+                                ));
+                            }
+                            let mut o = o.clone();
+                            o.optional = crate::hir::Optional(false);
+
+                            special_method_presence.iterator =
+                                Some(SuccessType::OutType(crate::hir::OutType::Opaque(o)));
+                            special_method_presence.fallible_iterator = true;
                         } else {
                             errors.push(LoweringError::other(
                                 "Iterator method must return nullable value".into(),
@@ -1215,6 +1260,12 @@ impl Attrs {
             ));
         }
 
+        if exception.is_some() && !matches!(context, AttributeContext::Type(..)) {
+            errors.push(LoweringError::other(
+                "`exception` can only be used on types".into(),
+            ));
+        }
+
         if !custom_extra_code.is_empty() {
             if !validator.attrs_supported().custom_bindings {
                 // We only validate that the language supports the bindings. We don't validate
@@ -1299,6 +1350,8 @@ impl Attrs {
             // Not inherited
             tuple: false,
             precondition_violation: false,
+            // Not inherited
+            exception: None,
             // Not inherited
             custom_extra_code: Default::default(),
             // Not inherited
@@ -1391,6 +1444,9 @@ pub struct BackendAttrSupport {
     pub partial_comparators: bool,
     /// Marking a method as the `next` method, which is special in this language.
     pub iterators: bool,
+    /// Iterator `next` methods returning `Result<Option<Box<T>>, E>`: an error is raised from the
+    /// iteration instead of ending it. Only meaningful in languages that throw exceptions.
+    pub fallible_iterators: bool,
     /// Marking a method as the `iterator` method, which is special in this language.
     pub iterables: bool,
     /// Marking a method as the `[]` operator, which is special in this language.
@@ -1405,6 +1461,8 @@ pub struct BackendAttrSupport {
     pub traits: bool,
     /// Marking a user-defined type as being a valid error result type.
     pub custom_errors: bool,
+    /// Naming the exception class an error type is raised as (see [`Attrs::exception`]).
+    pub exceptions: bool,
     /// Traits are safe to Send between threads (safe to mark as std::marker::Send)
     pub traits_are_send: bool,
     /// Traits are safe to Sync between threads (safe to mark as std::marker::Sync)
@@ -1472,6 +1530,7 @@ impl BackendAttrSupport {
             comparators: true,
             partial_comparators: true,
             iterators: true,
+            fallible_iterators: true,
             iterables: true,
             indexing: true,
             arithmetic: true,
@@ -1479,6 +1538,7 @@ impl BackendAttrSupport {
             callbacks: true,
             traits: true,
             custom_errors: true,
+            exceptions: true,
             traits_are_send: true,
             traits_are_sync: true,
             generate_mocking_interface: true,
@@ -1518,6 +1578,7 @@ impl BackendAttrSupport {
             "comparators" => Some(self.comparators),
             "partial_comparators" => Some(self.partial_comparators),
             "iterators" => Some(self.iterators),
+            "fallible_iterators" => Some(self.fallible_iterators),
             "iterables" => Some(self.iterables),
             "indexing" => Some(self.indexing),
             "arithmetic" => Some(self.arithmetic),
@@ -1525,6 +1586,7 @@ impl BackendAttrSupport {
             "callbacks" => Some(self.callbacks),
             "traits" => Some(self.traits),
             "custom_errors" => Some(self.custom_errors),
+            "exceptions" => Some(self.exceptions),
             "traits_are_send" => Some(self.traits_are_send),
             "traits_are_sync" => Some(self.traits_are_sync),
             "manually_disposable" => Some(self.manually_disposable),
@@ -1677,6 +1739,7 @@ impl AttributeValidator for BasicAttributeValidator {
                 comparators,
                 partial_comparators,
                 iterators,
+                fallible_iterators,
                 iterables,
                 indexing,
                 arithmetic,
@@ -1684,6 +1747,7 @@ impl AttributeValidator for BasicAttributeValidator {
                 callbacks,
                 traits,
                 custom_errors,
+                exceptions,
                 traits_are_send,
                 traits_are_sync,
                 generate_mocking_interface,
@@ -1722,6 +1786,7 @@ impl AttributeValidator for BasicAttributeValidator {
                 "comparators" => comparators,
                 "partial_comparators" => partial_comparators,
                 "iterators" => iterators,
+                "fallible_iterators" => fallible_iterators,
                 "iterables" => iterables,
                 "indexing" => indexing,
                 "arithmetic" => arithmetic,
@@ -1729,6 +1794,7 @@ impl AttributeValidator for BasicAttributeValidator {
                 "callbacks" => callbacks,
                 "traits" => traits,
                 "custom_errors" => custom_errors,
+                "exceptions" => exceptions,
                 "traits_are_send" => traits_are_send,
                 "traits_are_sync" => traits_are_sync,
                 "generate_mocking_interface" => generate_mocking_interface,
@@ -1960,6 +2026,89 @@ mod tests {
                     #[diplomat::attr(auto, iterator)]
                     pub fn iterator_no_option(&self) -> u8 { todo!() }
                 }
+            }
+        }
+    }
+
+    #[test]
+    fn test_fallible_iterator() {
+        // Supported: a `Result` around the optional item lowers to the same iterated type.
+        uitest_lowering_attr! { hir::BackendAttrSupport::all_true(),
+            #[diplomat::bridge]
+            mod ffi {
+                #[diplomat::opaque]
+                struct Item;
+                #[diplomat::opaque]
+                struct ItemError;
+                #[diplomat::opaque_mut]
+                struct ItemIterator;
+
+                impl ItemIterator {
+                    #[diplomat::attr(auto, iterator)]
+                    pub fn next(&mut self) -> Result<Option<Box<Item>>, Box<ItemError>> {
+                        todo!()
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_fallible_iterator_unsupported() {
+        uitest_lowering_attr! { hir::BackendAttrSupport { iterators: true, ..Default::default() },
+            #[diplomat::bridge]
+            mod ffi {
+                #[diplomat::opaque]
+                struct Item;
+                #[diplomat::opaque]
+                struct ItemError;
+                #[diplomat::opaque_mut]
+                struct ItemIterator;
+
+                impl ItemIterator {
+                    #[diplomat::attr(auto, iterator)]
+                    pub fn next(&mut self) -> Result<Option<Box<Item>>, Box<ItemError>> {
+                        todo!()
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_exception() {
+        uitest_lowering_attr! { hir::BackendAttrSupport::all_true(),
+            #[diplomat::bridge]
+            mod ffi {
+                #[diplomat::opaque]
+                #[diplomat::attr(auto, exception = "LookupError")]
+                struct NotFound;
+
+                #[diplomat::opaque]
+                struct Holder;
+
+                impl Holder {
+                    #[diplomat::attr(auto, exception = "LookupError")]
+                    pub fn not_a_type(&self) -> Result<(), Box<NotFound>> {
+                        todo!()
+                    }
+                }
+
+                #[diplomat::opaque]
+                #[diplomat::attr(auto, exception = "")]
+                struct Unnamed;
+            }
+        }
+    }
+
+    #[test]
+    fn test_exception_unsupported() {
+        uitest_lowering_attr! { hir::BackendAttrSupport::default(),
+            #[diplomat::bridge]
+            mod ffi {
+                #[diplomat::opaque]
+                #[diplomat::attr(*, exception = "LookupError")]
+                struct NotFound;
             }
         }
     }

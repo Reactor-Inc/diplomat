@@ -35,6 +35,10 @@ public:
 
   inline static somelib::diplomat::maybe_null<std::unique_ptr<somelib::OptionOpaque>> new_none();
 
+  inline static somelib::diplomat::result<somelib::diplomat::maybe_null<std::unique_ptr<somelib::OptionOpaque>>, std::monostate> new_fallible(int32_t i);
+
+  inline static somelib::diplomat::maybe_null<std::unique_ptr<somelib::OptionOpaque>> none_static();
+
   inline static std::optional<somelib::OptionStruct> returns();
 
   inline std::optional<intptr_t> option_isize() const;

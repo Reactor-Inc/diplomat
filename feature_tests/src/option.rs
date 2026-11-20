@@ -103,6 +103,21 @@ pub mod ffi {
             None
         }
 
+        #[diplomat::cfg(nanobind)]
+        pub fn new_fallible(i: i32) -> Result<Option<Box<OptionOpaque>>, ()> {
+            match i {
+                ..0 => Err(()),
+                0 => Ok(None),
+                _ => Ok(Some(Box::new(OptionOpaque(i)))),
+            }
+        }
+
+        #[diplomat::cfg(nanobind)]
+        #[diplomat::attr(auto, getter)]
+        pub fn none_static() -> Option<Box<OptionOpaque>> {
+            None
+        }
+
         #[diplomat::attr(dotnet, disable)]
         pub fn returns() -> Option<OptionStruct> {
             None

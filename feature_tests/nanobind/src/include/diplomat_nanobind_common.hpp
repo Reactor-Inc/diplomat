@@ -15,6 +15,7 @@
 #include <../src/nb_internals.h>  // Required for shimming
 #include "diplomat_runtime.hpp"
 #include "diplomat_ffi_errors.hpp"
+#include "diplomat_python_exceptions.hpp"
 
 extern PyObject* last_ffi_error;
 
@@ -125,7 +126,7 @@ namespace nanobind::detail
         auto errorPyV = ErrCaster::from_cpp(forward_like_<V>(std::move(err)), p, cl);
         if (errorPyV.is_valid())
         {
-            PyErr_SetObject(PyExc_Exception, errorPyV.ptr());
+            PyErr_SetObject(somelib::python_exception<std::remove_cvref_t<E>>::type(), errorPyV.ptr());
             // PyErr_SetObject takes ownership (https://github.com/python/cpython/blob/fa73fd473f00dd231f59e44798a3d00a46322658/Python/errors.c#L151)
             // but Nanobind expects Python to take ownership directly. So we decref after PyErr_SetObject takes ownership, to remove Nanobind's reference:
             Py_DECREF(errorPyV.ptr());
@@ -134,7 +135,7 @@ namespace nanobind::detail
         {
             char error_msg[512];
             snprintf(error_msg, sizeof(error_msg), "Cannot convert unknown type %s to python exception.", typeid(E).name());
-            PyErr_SetString(PyExc_Exception, error_msg);
+            PyErr_SetString(somelib::python_exception<std::remove_cvref_t<E>>::type(), error_msg);
         }
     }
 
@@ -393,18 +394,132 @@ namespace nanobind::detail
     };
 }
 
-// Return the inner type from next()
-// Next returns either a std::unique_ptr or std::optional.
-// When T is optional, return inner<T>&&. When T is unique_ptr, just return it.
+// What `__next__` returns for the value an iterator's next() produced, raising StopIteration when it
+// produced none. next() returns a pointer (unique_ptr or raw) that is null at the end, or an optional.
 template<typename T>
-struct next_inner_extractor {
-    static T&& get(T&& v) { return std::move(v); }
+struct iterator_next {
+    using type = T;
+    static T get(T&& v) {
+        if (!v) {
+            throw nb::stop_iteration();
+        }
+        return std::move(v);
+    }
 };
 
 template<typename T>
-struct next_inner_extractor<std::optional<T>> {
-    static T&& get(std::optional<T>&& v) { return std::move(v).value(); }
+struct iterator_next<std::optional<T>> {
+    using type = T;
+    static T get(std::optional<T>&& v) {
+        if (!v) {
+            throw nb::stop_iteration();
+        }
+        return std::move(v).value();
+    }
 };
+
+// A fallible next() (`Result<Option<..>, E>`): an error is returned as such for the result caster to raise,
+// and only an empty success ends the iteration.
+template<typename T, typename E>
+struct iterator_next<somelib::diplomat::result<T, E>> {
+    using Inner = typename iterator_next<T>::type;
+    using type = somelib::diplomat::result<Inner, E>;
+    static type get(somelib::diplomat::result<T, E>&& v) {
+        if (v.is_err()) {
+            return v.replace_ok(Inner{});
+        }
+        return somelib::diplomat::Ok<Inner>(iterator_next<T>::get(std::move(v).ok().value()));
+    }
+};
+
+// A returned opaque pointer (unique_ptr or raw) that may be null. Nanobind names a pointer's Python type
+// without its nullability, so methods that can return None return this instead, and their signature reads
+// `T | None`.
+template<typename T>
+struct nullable {
+    T value;
+};
+
+namespace nanobind::detail {
+    template <typename T>
+    struct type_caster<nullable<T>> {
+        using Caster = make_caster<T>;
+        static constexpr auto Name = optional_name(Caster::Name);
+
+        template <typename T_>
+        static handle from_cpp(T_&& v, rv_policy p, cleanup_list* cl) noexcept {
+            if (!v.value) {
+                return none().release();
+            }
+            return Caster::from_cpp(forward_like_<T_>(v.value), p, cl);
+        }
+    };
+}
+
+// Maps a return type to the one marking its opaque as nullable: R to nullable<R>, and result<T, E> to
+// result<nullable<T>, E>.
+template<typename R>
+struct nullable_return {
+    using type = nullable<R>;
+    static type wrap(R&& r) { return type{std::move(r)}; }
+};
+
+template<typename T, typename E>
+struct nullable_return<somelib::diplomat::result<T, E>> {
+    using type = somelib::diplomat::result<nullable<T>, E>;
+    static type wrap(somelib::diplomat::result<T, E>&& r) {
+        if (r.is_err()) {
+            return r.replace_ok(nullable<T>{});
+        }
+        return somelib::diplomat::Ok<nullable<T>>(nullable<T>{std::move(r).ok().value()});
+    }
+};
+
+// Wraps a function so its return goes through nullable_return. The result is a std::function, with `self` as an
+// explicit first parameter for member functions, which nanobind binds the same way as the function itself.
+template<typename Func>
+struct nullable_return_wrapper {};
+
+template<typename Return, typename... Args>
+struct nullable_return_wrapper<std::function<Return(Args...)>> {
+    using result = std::function<typename nullable_return<Return>::type(Args...)>;
+    static result wrap(std::function<Return(Args...)> f) {
+        return [f = std::move(f)](Args... args) {
+            return nullable_return<Return>::wrap(f(std::forward<Args>(args)...));
+        };
+    }
+};
+
+template<typename Return, typename... Args>
+struct nullable_return_wrapper<Return(*)(Args...)> {
+    using result = std::function<typename nullable_return<Return>::type(Args...)>;
+    static result wrap(Return (*f)(Args...)) {
+        return nullable_return_wrapper<std::function<Return(Args...)>>::wrap(f);
+    }
+};
+
+template<typename Return, typename Class, typename... Args>
+struct nullable_return_wrapper<Return(Class::*)(Args...)> {
+    using result = std::function<typename nullable_return<Return>::type(Class*, Args...)>;
+    static result wrap(Return (Class::*f)(Args...)) {
+        return nullable_return_wrapper<std::function<Return(Class*, Args...)>>::wrap(
+            [f](Class* c, Args... args) { return (c->*f)(std::forward<Args>(args)...); });
+    }
+};
+
+template<typename Return, typename Class, typename... Args>
+struct nullable_return_wrapper<Return(Class::*)(Args...) const> {
+    using result = std::function<typename nullable_return<Return>::type(const Class*, Args...)>;
+    static result wrap(Return (Class::*f)(Args...) const) {
+        return nullable_return_wrapper<std::function<Return(const Class*, Args...)>>::wrap(
+            [f](const Class* c, Args... args) { return (c->*f)(std::forward<Args>(args)...); });
+    }
+};
+
+template<typename Func>
+typename nullable_return_wrapper<std::decay_t<Func>>::result nullable_return_wrap(Func&& f) {
+    return nullable_return_wrapper<std::decay_t<Func>>::wrap(std::forward<Func>(f));
+}
 
 // These are defined in the root module.cpp file.
 extern void (*nb_tp_dealloc)(void *);

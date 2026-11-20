@@ -15,10 +15,7 @@ void add_RenamedOpaqueZSTIterator_binding(nb::module_ mod) {
         .def(nb::new_(std::move(maybe_op_unwrap(&somelib::ns::RenamedOpaqueZSTIterator::ctor))))
         .def("__next__", [](somelib::ns::RenamedOpaqueZSTIterator& self){
                 auto next = map_inner(self.next());
-                if (!next) {
-                    throw nb::stop_iteration();
-                }
-                return next_inner_extractor<decltype(next)>::get(std::move(next));
+                return iterator_next<decltype(next)>::get(std::move(next));
             })
             .def("__iter__", [](nb::handle self) { return self; })
         .def("__getitem__", [](somelib::ns::RenamedOpaqueZSTIterator* self, size_t index) {

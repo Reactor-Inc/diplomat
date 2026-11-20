@@ -26,6 +26,11 @@ namespace capi {
 
     somelib::capi::OptionOpaque* OptionOpaque_new_none(void);
 
+    typedef struct OptionOpaque_new_fallible_result {union {somelib::capi::OptionOpaque* ok; }; bool is_ok;} OptionOpaque_new_fallible_result;
+    OptionOpaque_new_fallible_result OptionOpaque_new_fallible(int32_t i);
+
+    somelib::capi::OptionOpaque* OptionOpaque_none_static(void);
+
     typedef struct OptionOpaque_returns_result {union {somelib::capi::OptionStruct ok; }; bool is_ok;} OptionOpaque_returns_result;
     OptionOpaque_returns_result OptionOpaque_returns(void);
 
@@ -88,6 +93,16 @@ inline somelib::diplomat::maybe_null<std::unique_ptr<somelib::OptionOpaque>> som
 
 inline somelib::diplomat::maybe_null<std::unique_ptr<somelib::OptionOpaque>> somelib::OptionOpaque::new_none() {
     auto result = somelib::capi::OptionOpaque_new_none();
+    return std::unique_ptr<somelib::OptionOpaque>(somelib::OptionOpaque::FromFFI(result));
+}
+
+inline somelib::diplomat::result<somelib::diplomat::maybe_null<std::unique_ptr<somelib::OptionOpaque>>, std::monostate> somelib::OptionOpaque::new_fallible(int32_t i) {
+    auto result = somelib::capi::OptionOpaque_new_fallible(i);
+    return result.is_ok ? somelib::diplomat::result<somelib::diplomat::maybe_null<std::unique_ptr<somelib::OptionOpaque>>, std::monostate>(somelib::diplomat::Ok<somelib::diplomat::maybe_null<std::unique_ptr<somelib::OptionOpaque>>>(std::unique_ptr<somelib::OptionOpaque>(somelib::OptionOpaque::FromFFI(result.ok)))) : somelib::diplomat::result<somelib::diplomat::maybe_null<std::unique_ptr<somelib::OptionOpaque>>, std::monostate>(somelib::diplomat::Err<std::monostate>());
+}
+
+inline somelib::diplomat::maybe_null<std::unique_ptr<somelib::OptionOpaque>> somelib::OptionOpaque::none_static() {
+    auto result = somelib::capi::OptionOpaque_none_static();
     return std::unique_ptr<somelib::OptionOpaque>(somelib::OptionOpaque::FromFFI(result));
 }
 

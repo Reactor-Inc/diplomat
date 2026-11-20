@@ -116,4 +116,129 @@ pub mod ffi {
             Err(Box::new(ResultOpaque(10)))
         }
     }
+
+    /// An error raised as `LookupError` in languages that raise exceptions.
+    #[diplomat::opaque]
+    #[diplomat::cfg(supports = exceptions)]
+    #[diplomat::attr(auto, exception = "LookupError")]
+    pub struct MissingKey(String);
+
+    impl MissingKey {
+        #[diplomat::attr(auto, stringifier)]
+        pub fn message(&self, w: &mut DiplomatWrite) {
+            use std::fmt::Write;
+            write!(w, "no key {:?}", self.0).unwrap();
+        }
+    }
+
+    /// An error raised as `AttributeError`, so a dynamic attribute lookup failing with it works with
+    /// Python's `hasattr` and `getattr(obj, name, default)`.
+    #[diplomat::opaque]
+    #[diplomat::cfg(supports = exceptions)]
+    #[diplomat::attr(auto, exception = "AttributeError")]
+    pub struct MissingAttribute(String);
+
+    impl MissingAttribute {
+        #[diplomat::attr(auto, stringifier)]
+        pub fn message(&self, w: &mut DiplomatWrite) {
+            use std::fmt::Write;
+            write!(w, "no attribute {:?}", self.0).unwrap();
+        }
+    }
+
+    /// An enum error raised as `ValueError`.
+    #[derive(Debug)]
+    #[diplomat::cfg(supports = exceptions)]
+    #[diplomat::attr(auto, exception = "ValueError")]
+    pub enum OutOfRange {
+        TooSmall,
+        TooLarge,
+    }
+
+    #[diplomat::opaque]
+    #[diplomat::cfg(supports = exceptions)]
+    pub struct ExceptionRaiser;
+
+    impl ExceptionRaiser {
+        pub fn lookup(key: &DiplomatStr) -> Result<i32, Box<MissingKey>> {
+            match key {
+                b"one" => Ok(1),
+                _ => Err(Box::new(MissingKey(
+                    String::from_utf8_lossy(key).into_owned(),
+                ))),
+            }
+        }
+
+        pub fn check_range(value: i32) -> Result<i32, OutOfRange> {
+            match value {
+                ..0 => Err(OutOfRange::TooSmall),
+                101.. => Err(OutOfRange::TooLarge),
+                _ => Ok(value),
+            }
+        }
+
+        #[diplomat::attr(auto, constructor)]
+        pub fn new() -> Box<Self> {
+            Box::new(Self)
+        }
+
+        /// Resolves the attributes Python does not find on the object itself; only `answer` exists.
+        #[diplomat::cfg(nanobind)]
+        #[diplomat::attr(nanobind, rename = "__getattr__")]
+        pub fn get_attribute(&self, name: &DiplomatStr) -> Result<i32, Box<MissingAttribute>> {
+            match name {
+                b"answer" => Ok(42),
+                _ => Err(Box::new(MissingAttribute(
+                    String::from_utf8_lossy(name).into_owned(),
+                ))),
+            }
+        }
+    }
+
+    /// Yields `ResultOpaque(0)`, `ResultOpaque(1)`, ... up to `len` items, failing at `fail_at` if it is reached.
+    #[diplomat::opaque_mut]
+    #[diplomat::cfg(supports = fallible_iterators)]
+    pub struct FallibleIterator {
+        next: i32,
+        len: i32,
+        fail_at: i32,
+    }
+
+    impl FallibleIterator {
+        #[diplomat::attr(auto, iterator)]
+        pub fn next(&mut self) -> Result<Option<Box<ResultOpaque>>, ErrorEnum> {
+            if self.next >= self.len {
+                return Ok(None);
+            }
+            if self.next == self.fail_at {
+                return Err(ErrorEnum::Bar);
+            }
+            self.next += 1;
+            Ok(Some(Box::new(ResultOpaque(self.next - 1))))
+        }
+    }
+
+    #[diplomat::opaque]
+    #[diplomat::cfg(supports = fallible_iterators)]
+    pub struct FallibleIterable {
+        len: i32,
+        fail_at: i32,
+    }
+
+    impl FallibleIterable {
+        /// `fail_at` at or past `len` never fails.
+        #[diplomat::attr(auto, constructor)]
+        pub fn new(len: i32, fail_at: i32) -> Box<Self> {
+            Box::new(Self { len, fail_at })
+        }
+
+        #[diplomat::attr(auto, iterable)]
+        pub fn iter(&self) -> Box<FallibleIterator> {
+            Box::new(FallibleIterator {
+                next: 0,
+                len: self.len,
+                fail_at: self.fail_at,
+            })
+        }
+    }
 }

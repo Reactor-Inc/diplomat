@@ -52,6 +52,9 @@ pub(super) struct MethodInfo<'a> {
     /// If this has a callback which takes an Opaque& reference (so we can swap them out with pointers.)
     /// See https://github.com/rust-diplomat/diplomat/issues/1197 for more.
     pub(super) has_op_cb: bool,
+    /// Whether the binding returns None for a null opaque (`Option<Box<T>>` or `Option<&T>`, also inside a
+    /// `Result`), and so marks the return nullable for its Python signature to read `T | None`.
+    pub(super) nullable_return: bool,
 }
 
 /// A type name with a corresponding variable name, such as a struct field or a function parameter.
@@ -765,6 +768,21 @@ impl<'ccx, 'tcx: 'ccx> ItemGenContext<'ccx, 'tcx> {
             lifetime_args.push(str.to_owned());
         }
 
+        // Iterators, indexers and iterables raise or hand Python an object instead of returning None, and
+        // constructors cannot return None.
+        let nullable_return = matches!(
+            method.output.success_type(),
+            hir::SuccessType::OutType(hir::Type::Opaque(path)) if path.is_optional()
+        ) && !matches!(
+            method.attrs.special_method,
+            Some(
+                hir::SpecialMethod::Iterator
+                    | hir::SpecialMethod::Indexer
+                    | hir::SpecialMethod::Iterable
+                    | hir::SpecialMethod::Constructor
+            )
+        );
+
         Some(MethodInfo {
             method,
             method_name,
@@ -781,6 +799,7 @@ impl<'ccx, 'tcx: 'ccx> ItemGenContext<'ccx, 'tcx> {
             overloads: vec![],
             docstring: self.formatter.fmt_doc_literal(&method.docs, &method.attrs),
             has_op_cb,
+            nullable_return,
         })
     }
 }

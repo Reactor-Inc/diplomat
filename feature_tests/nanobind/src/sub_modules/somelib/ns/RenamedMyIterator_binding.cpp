@@ -14,10 +14,7 @@ void add_RenamedMyIterator_binding(nb::module_ mod) {
     opaque
         .def("__next__", [](somelib::ns::RenamedMyIterator& self){
                 auto next = self.next();
-                if (!next) {
-                    throw nb::stop_iteration();
-                }
-                return next_inner_extractor<decltype(next)>::get(std::move(next));
+                return iterator_next<decltype(next)>::get(std::move(next));
             })
             .def("__iter__", [](nb::handle self) { return self; });
 }
