@@ -709,13 +709,15 @@ impl<'ccx, 'tcx: 'ccx> ItemGenContext<'ccx, 'tcx> {
                 .map(|p| visitor.visit_param(&p.ty, p.name.as_str())),
         );
 
-        let self_number = if matches!(
+        // Constructors are bound with `nb::new_`, whose `__new__` takes the type as its first argument: the
+        // new object is still the return value (0), but the parameters start one later.
+        let first_param_number = if matches!(
             method.attrs.special_method,
             Some(hir::SpecialMethod::Constructor)
         ) {
-            1 // per the docs, constructors don't have "returns", they act on "self"
+            2
         } else {
-            0
+            1
         };
 
         let mut lifetime_args = vec![];
@@ -740,10 +742,8 @@ impl<'ccx, 'tcx: 'ccx> ItemGenContext<'ccx, 'tcx> {
                         hir::borrowing_param::ParamBorrowInfo::BorrowedSlice
                         | hir::borrowing_param::ParamBorrowInfo::Struct(_)
                         | hir::borrowing_param::ParamBorrowInfo::BorrowedOpaque => {
-                            Some(format!(
-                                "nb::keep_alive<{self_number}, {}>()",
-                                i + 1 + self_number
-                            )) // Keep 0 (the return) alive until the element at P is returned
+                            // Keep the parameter alive for as long as the returned object lives.
+                            Some(format!("nb::keep_alive<0, {}>()", i + first_param_number))
                         }
                         _ => None,
                     })
