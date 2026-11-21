@@ -49,10 +49,12 @@ inline {{ m.return_ty }}& {{type_name}}::{{m.method_name -}}=({{ param_var.type_
 {%- endif -%}
 
 {%- when Some(hir::SpecialMethod::Iterable) %}
+{%- if m.range_for %}
 {% let helper_type = m.return_ty.replace("std::unique_ptr", &fmt.lib_prefixed_path("diplomat::next_to_iter_helper")) %}
 inline {{helper_type}} {{- type_name }}::begin() const {
     return iter();
 }
+{%- endif %}
 
 {%- when Some(hir::SpecialMethod::Comparison(false)) %}
 {{comparison_impl("return val", "bool")}}

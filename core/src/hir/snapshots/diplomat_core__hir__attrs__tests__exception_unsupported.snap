@@ -1,0 +1,6 @@
+---
+source: core/src/hir/attrs.rs
+expression: output
+---
+Diplomat error: Lowering error in NotFound
+> `exception` not supported in backend tests

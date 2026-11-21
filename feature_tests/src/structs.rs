@@ -659,6 +659,19 @@ pub mod ffi {
         }
     }
 
+    /// A struct whose opaque field may be unset.
+    #[diplomat::cfg(nanobind)]
+    pub struct OptionalOpaqueField<'a> {
+        pub op: Option<&'a Opaque>,
+        pub count: i32,
+    }
+
+    impl<'a> OptionalOpaqueField<'a> {
+        pub fn has_op(self) -> bool {
+            self.op.is_some()
+        }
+    }
+
     #[diplomat::attr(auto, tuple)]
     #[diplomat::cfg(supports=tuples)]
     pub struct TupleStruct<'a> {

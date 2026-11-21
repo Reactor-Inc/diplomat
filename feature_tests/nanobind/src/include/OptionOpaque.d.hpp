@@ -35,6 +35,15 @@ public:
 
   inline static somelib::diplomat::maybe_null<std::unique_ptr<somelib::OptionOpaque>> new_none();
 
+  inline static somelib::diplomat::result<somelib::diplomat::maybe_null<std::unique_ptr<somelib::OptionOpaque>>, std::monostate> new_fallible(int32_t i);
+
+  /**
+   * Takes a `&str`, whose validation wraps the return in a second `Result`.
+   */
+  inline static somelib::diplomat::result<somelib::diplomat::result<somelib::diplomat::maybe_null<std::unique_ptr<somelib::OptionOpaque>>, std::monostate>, somelib::diplomat::Utf8Error> new_from_str(std::string_view s);
+
+  inline static somelib::diplomat::maybe_null<std::unique_ptr<somelib::OptionOpaque>> none_static();
+
   inline static std::optional<somelib::OptionStruct> returns();
 
   inline std::optional<intptr_t> option_isize() const;

@@ -85,6 +85,9 @@ pub struct MethodInfo<'a> {
     docs: String,
     deprecated: Option<&'a str>,
     extra_impl_code: ExtraCode,
+    /// For an iterable, whether its iterator can drive a range-based `for` through `begin()`/`end()`: not when the
+    /// iterator's `next` is fallible, as C++ has no error to stop such a loop with.
+    range_for: bool,
 }
 
 /// An expression with a corresponding variable name, such as a struct field or a function parameter.
@@ -897,6 +900,21 @@ impl<'ccx, 'tcx: 'ccx> ItemGenContext<'ccx, 'tcx, '_> {
             post_qualifiers.push("DIPLOMAT_LIFETIME_BOUND".into());
         }
 
+        let range_for = matches!(
+            method.attrs.special_method,
+            Some(hir::SpecialMethod::Iterable)
+        ) && match method.output.success_type() {
+            SuccessType::OutType(Type::Opaque(iterator)) => {
+                !self
+                    .c
+                    .tcx
+                    .resolve_opaque(iterator.tcx_id)
+                    .special_method_presence
+                    .fallible_iterator
+            }
+            _ => false,
+        };
+
         Some(MethodInfo::<'ccx> {
             method,
             return_ty,
@@ -914,6 +932,7 @@ impl<'ccx, 'tcx: 'ccx> ItemGenContext<'ccx, 'tcx, '_> {
             docs: self.formatter.fmt_docs(&method.docs, &method.attrs),
             deprecated: method.attrs.deprecated.as_deref(),
             extra_impl_code: self.impl_extra_code_from_attrs(&method.attrs.custom_extra_code),
+            range_for,
         })
     }
 
@@ -1221,7 +1240,7 @@ impl<'ccx, 'tcx: 'ccx> ItemGenContext<'ccx, 'tcx, '_> {
             // so every field inside a struct that is capable of mutation, we ensure we have a carve-out to return as a pointer from C++ to C, rather than from a reference.
             Type::Opaque(op) if is_in_mutable_struct && !op.is_owned() => {
                 if op.is_optional() {
-                    format!("{field_getter}->AsFFI() : nullptr").into()
+                    format!("{field_getter} ? {field_getter}->AsFFI() : nullptr").into()
                 } else {
                     format!("{field_getter}->AsFFI()").into()
                 }

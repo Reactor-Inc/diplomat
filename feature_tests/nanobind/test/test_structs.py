@@ -99,3 +99,31 @@ def test_struct_char_constructor_none_defaults():
     assert ps.b == U'餐'
     ps = somelib.PrimitiveStruct(1.0, True, None, 0, 0, 0)
     assert ps.b == U'\0'
+
+def _getter_return_type(cls, name):
+    """The return annotation of a property's getter, as the stubs show it."""
+    return getattr(cls, name).fget.__nb_signature__[0][0].split("->")[-1].strip()
+
+
+def test_optional_opaque_fields_are_typed_optional():
+    assert _getter_return_type(somelib.OptionalOpaqueField, "op").endswith(".Opaque | None")
+    assert _getter_return_type(somelib.OptionStruct, "a").endswith(".OptionOpaque | None")
+    # A required opaque field stays as is.
+    assert not _getter_return_type(somelib.OutTupleStruct, "opaque").endswith("| None")
+
+
+def test_optional_opaque_field_values():
+    unset = somelib.OptionalOpaqueField(None, 3)
+    assert unset.op is None
+    assert not unset.has_op()
+
+    op = somelib.Opaque()
+    field = somelib.OptionalOpaqueField(op, 3)
+    assert field.op is not None
+    assert field.has_op()
+    field.op = None
+    assert field.op is None
+    assert not field.has_op()
+
+    nones = somelib.OptionOpaque.new_struct_nones()
+    assert nones.a is None and nones.b is None

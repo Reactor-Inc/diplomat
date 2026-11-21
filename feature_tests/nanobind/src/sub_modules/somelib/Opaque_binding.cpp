@@ -20,7 +20,7 @@ void add_Opaque_binding(nb::module_ mod) {
         .def("get_debug_str", &somelib::Opaque::get_debug_str)
         .def_static("returns_imported", &somelib::Opaque::returns_imported)
         .def_static("returns_usize", &somelib::Opaque::returns_usize)
-        .def_static("try_from_utf8", std::move(maybe_op_unwrap(&somelib::Opaque::try_from_utf8)), "input"_a);
+        .def_static("try_from_utf8", nullable_return_wrap(std::move(maybe_op_unwrap(&somelib::Opaque::try_from_utf8))), "input"_a);
 }
 
 } 

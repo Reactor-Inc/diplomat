@@ -21,6 +21,53 @@ use crate::cpp;
 // using pip install. Compilation requires a C++ compiler & CMake, as well as a downloaded
 // copy of libnanobind.
 
+/// The built-in Python exception classes an error type can name with `exception = "..."`. Each is raised with the
+/// error object as its single argument, so classes whose constructor needs more (such as `UnicodeDecodeError`) and
+/// control-flow classes (such as `StopIteration` or `KeyboardInterrupt`) are left out.
+const PYTHON_EXCEPTIONS: &[&str] = &[
+    "Exception",
+    "ArithmeticError",
+    "AssertionError",
+    "AttributeError",
+    "BufferError",
+    "EOFError",
+    "FloatingPointError",
+    "ImportError",
+    "ModuleNotFoundError",
+    "LookupError",
+    "IndexError",
+    "KeyError",
+    "MemoryError",
+    "NameError",
+    "UnboundLocalError",
+    "NotImplementedError",
+    "OSError",
+    "BlockingIOError",
+    "ChildProcessError",
+    "ConnectionError",
+    "BrokenPipeError",
+    "ConnectionAbortedError",
+    "ConnectionRefusedError",
+    "ConnectionResetError",
+    "FileExistsError",
+    "FileNotFoundError",
+    "InterruptedError",
+    "IsADirectoryError",
+    "NotADirectoryError",
+    "PermissionError",
+    "ProcessLookupError",
+    "TimeoutError",
+    "OverflowError",
+    "RecursionError",
+    "ReferenceError",
+    "RuntimeError",
+    "SystemError",
+    "TypeError",
+    "ValueError",
+    "UnicodeError",
+    "ZeroDivisionError",
+];
+
 pub(crate) fn attr_support() -> BackendAttrSupport {
     let mut a = BackendAttrSupport::default();
 
@@ -42,6 +89,7 @@ pub(crate) fn attr_support() -> BackendAttrSupport {
     a.partial_comparators = true;
     a.stringifiers = true;
     a.iterators = true;
+    a.fallible_iterators = true;
     a.iterables = true;
     a.arithmetic = true;
     a.indexing = true;
@@ -61,6 +109,7 @@ pub(crate) fn attr_support() -> BackendAttrSupport {
     a.mut_struct_refs = true;
     a.free_functions = true;
     a.custom_bindings = true;
+    a.exceptions = true;
     a.tuples = true;
     a.default_args = true;
     a.opaque_slices = true;
@@ -136,6 +185,23 @@ pub(crate) fn run<'cx>(
         lib_name: formatter.cxx.lib_name.clone(),
     };
 
+    struct PythonExceptionsHeaderEntry {
+        type_name: String,
+        exception: String,
+        include_path: String,
+    }
+    /// Maps each error type named with `exception = "..."` to the Python exception class it is raised as.
+    #[derive(Template)]
+    #[template(path = "nanobind/python_exceptions.h.jinja", escape = "none")]
+    struct PythonExceptionsHeader {
+        entries: Vec<PythonExceptionsHeaderEntry>,
+        lib_name: String,
+    }
+    let mut python_exceptions_header = PythonExceptionsHeader {
+        entries: vec![],
+        lib_name: lib_name.clone(),
+    };
+
     #[derive(Template)]
     #[template(path = "nanobind/binding.cpp.jinja", escape = "none")]
     struct Binding {
@@ -191,6 +257,23 @@ pub(crate) fn run<'cx>(
             .insert(cpp_impl_path.clone());
 
         let guard = errors.set_context_ty(ty.name_with_span().into());
+
+        if let Some(exception) = &ty.attrs().exception {
+            if PYTHON_EXCEPTIONS.contains(&exception.as_str()) {
+                python_exceptions_header
+                    .entries
+                    .push(PythonExceptionsHeaderEntry {
+                        type_name: format!("::{}", formatter.cxx.fmt_type_name(id)),
+                        exception: exception.clone(),
+                        include_path: cpp_decl_path.clone(),
+                    });
+            } else {
+                errors.push_error(format!(
+                    "`exception = \"{exception}\"` is not a Python built-in exception class this backend can raise; expected one of {}",
+                    PYTHON_EXCEPTIONS.join(", ")
+                ));
+            }
+        }
 
         let mut body = String::default();
         let mut binding_prefix = String::default();
@@ -428,6 +511,10 @@ pub(crate) fn run<'cx>(
         "include/diplomat_ffi_errors.hpp".to_string(),
         ffi_errors_header.render().unwrap(),
     );
+    files.add_file(
+        "include/diplomat_python_exceptions.hpp".to_string(),
+        python_exceptions_header.render().unwrap(),
+    );
 
     (files, errors)
 }
@@ -632,6 +719,178 @@ mod test {
                 }
             }}
         };
+    }
+
+    #[test]
+    fn test_nullable_returns_and_fallible_iterator() {
+        let callback = |_, out: String| {
+            // Returns that can be None are wrapped so their signature reads `T | None`, including inside a
+            // `Result` and for static getters; the iterator's own `next` is not, as it raises StopIteration.
+            assert!(
+                out.contains(r#".def_static("maybe", nullable_return_wrap("#),
+                "{out}"
+            );
+            assert!(
+                out.contains(r#".def_static("maybe_fallible", nullable_return_wrap("#),
+                "{out}"
+            );
+            assert!(
+                out.contains(
+                    r#".def("maybe_self", nullable_return_wrap(&mylib::Item::maybe_self)"#
+                ),
+                "{out}"
+            );
+            // A `&str` parameter wraps the return in a second `Result`.
+            assert!(
+                out.contains(r#".def_static("maybe_named", nullable_return_wrap("#),
+                "{out}"
+            );
+            assert!(
+                out.contains("nullable_return<decltype(mylib::Item::maybe_static())>::wrap("),
+                "{out}"
+            );
+            assert!(
+                out.contains(
+                    r#".def_static("always", std::move(maybe_op_unwrap(&mylib::Item::always)))"#
+                ),
+                "{out}"
+            );
+            assert!(
+                out.contains("return iterator_next<decltype(next)>::get(std::move(next));"),
+                "{out}"
+            );
+            insta::assert_snapshot!(out);
+        };
+        test_gen! {
+            Opaque, gen_opaque_def, [], callback,
+            {
+            #[diplomat::bridge]
+            #[diplomat::attr(auto, namespace = "mylib")]
+            mod ffi {
+                #[diplomat::opaque_mut]
+                struct Item;
+
+                #[diplomat::opaque]
+                struct ItemError;
+
+                impl Item {
+                    pub fn maybe() -> Option<Box<Item>> {
+                        todo!()
+                    }
+
+                    pub fn maybe_fallible() -> Result<Option<Box<Item>>, Box<ItemError>> {
+                        todo!()
+                    }
+
+                    pub fn maybe_self<'a>(&'a self) -> Option<&'a Item> {
+                        todo!()
+                    }
+
+                    pub fn maybe_named(name: &str) -> Option<Box<Item>> {
+                        todo!()
+                    }
+
+                    #[diplomat::attr(auto, getter)]
+                    pub fn maybe_static() -> Option<Box<Item>> {
+                        todo!()
+                    }
+
+                    pub fn always() -> Box<Item> {
+                        todo!()
+                    }
+
+                    #[diplomat::attr(auto, iterator)]
+                    pub fn next(&mut self) -> Result<Option<Box<Item>>, Box<ItemError>> {
+                        todo!()
+                    }
+                }
+            }
+            }
+        };
+    }
+
+    #[test]
+    fn test_optional_opaque_fields_are_nullable() {
+        let callback = |_, out: String| {
+            // An optional borrowed field is read through `nullable` (so its type reads `T | None`) and can be
+            // set to None; a required primitive field stays a plain member binding.
+            assert!(
+                out.contains("return nullable<decltype(self.op)>{self.op};"),
+                "{out}"
+            );
+            assert!(
+                out.contains(r#"nb::for_setter(nb::arg("value").none())"#),
+                "{out}"
+            );
+            assert!(out.contains(r#".def_rw("count", "#), "{out}");
+            insta::assert_snapshot!(out);
+        };
+        let mut header = String::new();
+        test_gen! {
+            Struct, gen_struct_def, [&mut header,], callback,
+            {#[diplomat::bridge]
+            #[diplomat::attr(auto, namespace = "mylib")]
+            mod ffi {
+                pub struct WithOptionalOpaque<'a> {
+                    pub op: Option<&'a Item>,
+                    pub count: i32,
+                }
+
+                #[diplomat::opaque]
+                pub struct Item;
+            }}
+        };
+    }
+
+    #[test]
+    fn test_exception_names_are_validated() {
+        let item: syn::File = syn::parse_quote! {
+            #[diplomat::bridge]
+            mod ffi {
+                #[diplomat::opaque]
+                #[diplomat::attr(auto, exception = "LookupError")]
+                struct NotFound;
+
+                #[diplomat::opaque]
+                #[diplomat::attr(auto, exception = "NoSuchError")]
+                struct Misnamed;
+            }
+        };
+        let mut attr_validator = hir::BasicAttributeValidator::new("nanobind");
+        attr_validator.support = crate::nanobind::attr_support();
+        let tcx = hir::TypeContext::from_syn(
+            &item,
+            Default::default(),
+            attr_validator,
+            None,
+            &diplomat_core::ast::SpanLocation::None,
+        )
+        .expect("lowering");
+        let mut config = crate::Config::default();
+        config.shared_config.lib_name = Some("mylib".into());
+        let docs = Default::default();
+        let (files, errors) = crate::nanobind::run(&tcx, config, &docs);
+
+        let errors = errors
+            .take_all()
+            .into_iter()
+            .map(|(_, e)| e)
+            .collect::<Vec<_>>();
+        assert_eq!(errors.len(), 1, "{errors:?}");
+        assert!(errors[0].contains("NoSuchError"), "{}", errors[0]);
+
+        let header = files
+            .files
+            .borrow()
+            .get("include/diplomat_python_exceptions.hpp")
+            .cloned()
+            .expect("exceptions header");
+        assert!(
+            header.contains("struct python_exception<::mylib::NotFound>"),
+            "{header}"
+        );
+        assert!(header.contains("PyExc_LookupError"), "{header}");
+        assert!(!header.contains("Misnamed"), "{header}");
     }
 
     #[test]

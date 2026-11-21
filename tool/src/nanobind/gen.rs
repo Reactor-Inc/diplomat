@@ -52,6 +52,9 @@ pub(super) struct MethodInfo<'a> {
     /// If this has a callback which takes an Opaque& reference (so we can swap them out with pointers.)
     /// See https://github.com/rust-diplomat/diplomat/issues/1197 for more.
     pub(super) has_op_cb: bool,
+    /// Whether the binding returns None for a null opaque (`Option<Box<T>>` or `Option<&T>`, also inside a
+    /// `Result`), and so marks the return nullable for its Python signature to read `T | None`.
+    pub(super) nullable_return: bool,
 }
 
 /// A type name with a corresponding variable name, such as a struct field or a function parameter.
@@ -706,13 +709,15 @@ impl<'ccx, 'tcx: 'ccx> ItemGenContext<'ccx, 'tcx> {
                 .map(|p| visitor.visit_param(&p.ty, p.name.as_str())),
         );
 
-        let self_number = if matches!(
+        // Constructors are bound with `nb::new_`, whose `__new__` takes the type as its first argument: the
+        // new object is still the return value (0), but the parameters start one later.
+        let first_param_number = if matches!(
             method.attrs.special_method,
             Some(hir::SpecialMethod::Constructor)
         ) {
-            1 // per the docs, constructors don't have "returns", they act on "self"
+            2
         } else {
-            0
+            1
         };
 
         let mut lifetime_args = vec![];
@@ -737,10 +742,8 @@ impl<'ccx, 'tcx: 'ccx> ItemGenContext<'ccx, 'tcx> {
                         hir::borrowing_param::ParamBorrowInfo::BorrowedSlice
                         | hir::borrowing_param::ParamBorrowInfo::Struct(_)
                         | hir::borrowing_param::ParamBorrowInfo::BorrowedOpaque => {
-                            Some(format!(
-                                "nb::keep_alive<{self_number}, {}>()",
-                                i + 1 + self_number
-                            )) // Keep 0 (the return) alive until the element at P is returned
+                            // Keep the parameter alive for as long as the returned object lives.
+                            Some(format!("nb::keep_alive<0, {}>()", i + first_param_number))
                         }
                         _ => None,
                     })
@@ -765,6 +768,21 @@ impl<'ccx, 'tcx: 'ccx> ItemGenContext<'ccx, 'tcx> {
             lifetime_args.push(str.to_owned());
         }
 
+        // Iterators, indexers and iterables raise or hand Python an object instead of returning None, and
+        // constructors cannot return None.
+        let nullable_return = matches!(
+            method.output.success_type(),
+            hir::SuccessType::OutType(hir::Type::Opaque(path)) if path.is_optional()
+        ) && !matches!(
+            method.attrs.special_method,
+            Some(
+                hir::SpecialMethod::Iterator
+                    | hir::SpecialMethod::Indexer
+                    | hir::SpecialMethod::Iterable
+                    | hir::SpecialMethod::Constructor
+            )
+        );
+
         Some(MethodInfo {
             method,
             method_name,
@@ -781,6 +799,7 @@ impl<'ccx, 'tcx: 'ccx> ItemGenContext<'ccx, 'tcx> {
             overloads: vec![],
             docstring: self.formatter.fmt_doc_literal(&method.docs, &method.attrs),
             has_op_cb,
+            nullable_return,
         })
     }
 }

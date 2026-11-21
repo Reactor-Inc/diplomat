@@ -58,3 +58,17 @@ def test_getter_borrow():
     gc.collect()
     # The memory underlying Foo is kept alive, even after deletion:
     assert b.foo.as_returning().bytes == 'test'
+
+def test_constructor_borrow_is_released_with_the_object():
+    # A constructor keeps a borrowed argument alive for as long as the object it returns, and no
+    # longer: the argument must not be kept alive by the class.
+    import gc
+    import sys
+
+    s = "".join(["borrowed by Foo"])
+    before = sys.getrefcount(s)
+    foo = somelib.Foo(s)
+    assert sys.getrefcount(s) == before + 1
+    del foo
+    gc.collect()
+    assert sys.getrefcount(s) == before

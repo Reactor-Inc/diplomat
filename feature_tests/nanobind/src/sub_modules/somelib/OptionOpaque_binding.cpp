@@ -24,19 +24,22 @@ void add_OptionOpaque_binding(nb::module_ mod) {
         .def_static("accepts_option_str_slice", &somelib::OptionOpaque::accepts_option_str_slice, "arg"_a= nb::none(), nb::kw_only(), "sentinel"_a)
         .def_static("accepts_option_u8", &somelib::OptionOpaque::accepts_option_u8, "arg"_a= nb::none(), nb::kw_only(), "sentinel"_a)
         .def("assert_integer", &somelib::OptionOpaque::assert_integer, "i"_a)
-        .def_static("new", std::move(maybe_op_unwrap(&somelib::OptionOpaque::new_)), "i"_a)
-        .def_static("new_none", std::move(maybe_op_unwrap(&somelib::OptionOpaque::new_none)))
+        .def_static("new", nullable_return_wrap(std::move(maybe_op_unwrap(&somelib::OptionOpaque::new_))), "i"_a)
+        .def_static("new_fallible", nullable_return_wrap(std::move(maybe_op_unwrap(&somelib::OptionOpaque::new_fallible))), "i"_a)
+        .def_static("new_from_str", nullable_return_wrap(std::move(maybe_op_unwrap(&somelib::OptionOpaque::new_from_str))), "s"_a, "Takes a `&str`, whose validation wraps the return in a second `Result`.")
+        .def_static("new_none", nullable_return_wrap(std::move(maybe_op_unwrap(&somelib::OptionOpaque::new_none))))
         .def_static("new_struct", &somelib::OptionOpaque::new_struct)
         .def_static("new_struct_nones", &somelib::OptionOpaque::new_struct_nones)
+        .def_prop_ro_static("none_static", [](nb::handle) -> nullable_return<decltype(somelib::OptionOpaque::none_static())>::type { return nullable_return<decltype(somelib::OptionOpaque::none_static())>::wrap(map_inner(somelib::OptionOpaque::none_static())); })
         .def("option_i32", &somelib::OptionOpaque::option_i32)
         .def("option_isize", &somelib::OptionOpaque::option_isize)
         .def_static("option_opaque_argument", &somelib::OptionOpaque::option_opaque_argument, "arg"_a= nb::none())
         .def("option_u32", &somelib::OptionOpaque::option_u32)
         .def("option_usize", &somelib::OptionOpaque::option_usize)
         .def_static("returns", &somelib::OptionOpaque::returns)
-        .def("returns_none_self", &somelib::OptionOpaque::returns_none_self, nb::rv_policy::reference_internal)
+        .def("returns_none_self", nullable_return_wrap(&somelib::OptionOpaque::returns_none_self), nb::rv_policy::reference_internal)
         .def_static("returns_option_input_struct", &somelib::OptionOpaque::returns_option_input_struct)
-        .def("returns_some_self", &somelib::OptionOpaque::returns_some_self, nb::rv_policy::reference_internal);
+        .def("returns_some_self", nullable_return_wrap(&somelib::OptionOpaque::returns_some_self), nb::rv_policy::reference_internal);
 }
 
 } 

@@ -1,0 +1,22 @@
+---
+source: tool/src/nanobind/mod.rs
+expression: out
+---
+PyType_Slot mylib_Item_slots[] = {
+    {Py_tp_free, (void *)mylib::Item::operator delete },
+    {Py_tp_dealloc, (void *)diplomat_tp_dealloc},
+    {0, nullptr}};
+
+nb::class_<mylib::Item> opaque(mod, "Item", nb::type_slots(mylib_Item_slots));
+opaque
+    .def_static("always", std::move(maybe_op_unwrap(&mylib::Item::always)))
+    .def_static("maybe", nullable_return_wrap(std::move(maybe_op_unwrap(&mylib::Item::maybe))))
+    .def_static("maybe_fallible", nullable_return_wrap(std::move(maybe_op_unwrap(&mylib::Item::maybe_fallible))))
+    .def_static("maybe_named", nullable_return_wrap(std::move(maybe_op_unwrap(&mylib::Item::maybe_named))), "name"_a)
+    .def("maybe_self", nullable_return_wrap(&mylib::Item::maybe_self), nb::rv_policy::reference_internal)
+    .def_prop_ro_static("maybe_static", [](nb::handle) -> nullable_return<decltype(mylib::Item::maybe_static())>::type { return nullable_return<decltype(mylib::Item::maybe_static())>::wrap(map_inner(mylib::Item::maybe_static())); })
+    .def("__next__", [](mylib::Item& self){
+            auto next = map_inner(self.next());
+            return iterator_next<decltype(next)>::get(std::move(next));
+        })
+        .def("__iter__", [](nb::handle self) { return self; });
