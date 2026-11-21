@@ -25,6 +25,7 @@ void add_ImmutableStructOfOpaque_binding(nb::module_);
 void add_MyStruct_binding(nb::module_);
 void add_MyStructContainingAnOption_binding(nb::module_);
 void add_MyZst_binding(nb::module_);
+void add_OptionalOpaqueField_binding(nb::module_);
 void add_PrimitiveStruct_binding(nb::module_);
 void add_ScalarPairWithPadding_binding(nb::module_);
 void add_StructArithmetic_binding(nb::module_);
@@ -254,6 +255,7 @@ NB_MODULE(somelib, mod)
     add_MyStruct_binding(mod);
     add_MyStructContainingAnOption_binding(mod);
     add_MyZst_binding(mod);
+    add_OptionalOpaqueField_binding(mod);
     add_PrimitiveStruct_binding(mod);
     add_ScalarPairWithPadding_binding(mod);
     add_StructArithmetic_binding(mod);

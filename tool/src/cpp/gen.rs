@@ -1240,7 +1240,7 @@ impl<'ccx, 'tcx: 'ccx> ItemGenContext<'ccx, 'tcx, '_> {
             // so every field inside a struct that is capable of mutation, we ensure we have a carve-out to return as a pointer from C++ to C, rather than from a reference.
             Type::Opaque(op) if is_in_mutable_struct && !op.is_owned() => {
                 if op.is_optional() {
-                    format!("{field_getter}->AsFFI() : nullptr").into()
+                    format!("{field_getter} ? {field_getter}->AsFFI() : nullptr").into()
                 } else {
                     format!("{field_getter}->AsFFI()").into()
                 }

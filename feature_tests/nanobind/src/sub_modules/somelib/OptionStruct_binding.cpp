@@ -10,10 +10,10 @@ void add_OptionStruct_binding(nb::module_ mod) {
     nb::class_<somelib::OptionStruct> st(mod, "OptionStruct");
     st
         .def_prop_ro("a",
-            [](const somelib::OptionStruct& self) { return self.a.get(); }
+            [](const somelib::OptionStruct& self) { return nullable<decltype(self.a.get())>{self.a.get()}; }
         )
         .def_prop_ro("b",
-            [](const somelib::OptionStruct& self) { return self.b.get(); }
+            [](const somelib::OptionStruct& self) { return nullable<decltype(self.b.get())>{self.b.get()}; }
         )
         .def_ro("c", &somelib::OptionStruct::c)
         .def_prop_ro("d",

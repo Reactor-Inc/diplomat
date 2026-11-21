@@ -810,6 +810,39 @@ mod test {
     }
 
     #[test]
+    fn test_optional_opaque_fields_are_nullable() {
+        let callback = |_, out: String| {
+            // An optional borrowed field is read through `nullable` (so its type reads `T | None`) and can be
+            // set to None; a required primitive field stays a plain member binding.
+            assert!(
+                out.contains("return nullable<decltype(self.op)>{self.op};"),
+                "{out}"
+            );
+            assert!(
+                out.contains(r#"nb::for_setter(nb::arg("value").none())"#),
+                "{out}"
+            );
+            assert!(out.contains(r#".def_rw("count", "#), "{out}");
+            insta::assert_snapshot!(out);
+        };
+        let mut header = String::new();
+        test_gen! {
+            Struct, gen_struct_def, [&mut header,], callback,
+            {#[diplomat::bridge]
+            #[diplomat::attr(auto, namespace = "mylib")]
+            mod ffi {
+                pub struct WithOptionalOpaque<'a> {
+                    pub op: Option<&'a Item>,
+                    pub count: i32,
+                }
+
+                #[diplomat::opaque]
+                pub struct Item;
+            }}
+        };
+    }
+
+    #[test]
     fn test_exception_names_are_validated() {
         let item: syn::File = syn::parse_quote! {
             #[diplomat::bridge]
