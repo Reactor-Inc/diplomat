@@ -28,7 +28,8 @@ void add_RenamedMyIndexer_binding(nb::module_ mod) {
                 } else {
                     return out;
                 }
-            }, "s"_a);
+            }, "s"_a)
+        .def("__iter__", std::move(maybe_op_unwrap(&somelib::ns::RenamedMyIndexer::iter)), nb::keep_alive<0, 1>());
 }
 
 } 

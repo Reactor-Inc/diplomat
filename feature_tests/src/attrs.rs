@@ -263,6 +263,23 @@ pub mod ffi {
             let st = String::from_utf8(s.to_vec()).unwrap();
             self.0.iter().find(|i| **i == st).map(|s| s.as_bytes())
         }
+
+        #[diplomat::cfg(nanobind)]
+        #[diplomat::attr(auto, iterable)]
+        pub fn iter<'a>(&'a self) -> Box<MyStringIterator<'a>> {
+            Box::new(MyStringIterator(self.0.iter()))
+        }
+    }
+
+    /// Yields strings borrowed from a `MyIndexer`.
+    #[diplomat::opaque_mut]
+    #[diplomat::cfg(nanobind)]
+    pub struct MyStringIterator<'a>(std::slice::Iter<'a, String>);
+    impl<'a> MyStringIterator<'a> {
+        #[diplomat::attr(auto, iterator)]
+        pub fn next(&'a mut self) -> Option<&'a DiplomatStr> {
+            self.0.next().map(|string| string.as_bytes())
+        }
     }
 
     #[diplomat::opaque]

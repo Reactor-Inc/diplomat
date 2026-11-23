@@ -725,14 +725,17 @@ impl<'ccx, 'tcx: 'ccx> ItemGenContext<'ccx, 'tcx> {
         // Only returned values that are either created on return or return addresses previously unknown
         // to nanobind require additional annotation with keep_alive per: https://nanobind.readthedocs.io/en/latest/api_core.html#_CPPv4N8nanobind9rv_policyE
         // For any return of a reference to an existing object, nanobind is smart enough to locate its python wrapper object & correctly increment its refcount
-        // No keep_alive for even borrowed string outputs, the type conversion always involves a copy
-        if matches!(
+        // No keep_alive for even borrowed string outputs, the type conversion always involves a copy. That holds for
+        // an iterator's items too: only the opaques it yields borrow from it. A copied item is also not
+        // weak-referenceable, so nanobind raises on any keep_alive whose nurse it is.
+        let is_iterator = matches!(
             method.attrs.special_method,
             Some(hir::SpecialMethod::Iterator)
-        ) || matches!(
+        );
+        if matches!(
             method.output.success_type(),
             hir::SuccessType::OutType(hir::OutType::Struct(..))
-        ) || matches!(method.output.success_type(), hir::SuccessType::OutType(hir::OutType::Opaque(pth)) if pth.is_owned())
+        ) || matches!(method.output.success_type(), hir::SuccessType::OutType(hir::OutType::Opaque(pth)) if pth.is_owned() || is_iterator)
         {
             lifetime_args.extend(
                 param_borrows

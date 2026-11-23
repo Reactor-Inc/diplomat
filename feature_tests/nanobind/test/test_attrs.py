@@ -70,6 +70,10 @@ def test_indexing():
     with pytest.raises(IndexError):
         assert i["gibberish"]
 
+def test_iterating_borrowed_strings():
+    # Each item is a copy, so nothing has to keep the iterator alive for it.
+    assert list(somelib.ns.RenamedMyIndexer(["This", "is", "a", "test"])) == ["This", "is", "a", "test"]
+
 def test_sequencing():
     i = 0
     ind = somelib.ns.RenamedOpaqueZSTIndexer()
