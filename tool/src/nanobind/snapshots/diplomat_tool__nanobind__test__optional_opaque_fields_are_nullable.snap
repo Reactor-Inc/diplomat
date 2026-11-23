@@ -1,0 +1,14 @@
+---
+source: tool/src/nanobind/mod.rs
+expression: out
+---
+nb::class_<mylib::WithOptionalOpaque> st(mod, "WithOptionalOpaque");
+st
+    .def(nb::init<>())
+    .def(nb::init<mylib::Item*, int32_t>(), "op"_a.none(),  "count"_a.none())
+    .def_prop_rw("op",
+        [](const mylib::WithOptionalOpaque& self) { return nullable<decltype(self.op)>{self.op}; },
+        [](mylib::WithOptionalOpaque& self, mylib::Item* v) { self.op = v; },
+        nb::for_setter(nb::arg("value").none())
+    )
+    .def_rw("count", &mylib::WithOptionalOpaque::count);

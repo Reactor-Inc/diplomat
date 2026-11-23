@@ -82,3 +82,60 @@ class TestResult(unittest.TestCase):
 
         assert get_return_type(somelib.ResultOpaque.new_int) == "int"
         assert get_return_type(somelib.ResultOpaque.new_failing_foo).endswith("ResultOpaque")
+
+
+class TestExceptions(unittest.TestCase):
+    """Error types naming an `exception` are raised as that Python class, with the error as its argument."""
+
+    def test_opaque_error_raises_named_class(self):
+        assert somelib.ExceptionRaiser.lookup("one") == 1
+        with self.assertRaises(LookupError) as cm:
+            somelib.ExceptionRaiser.lookup("two")
+        assert str(cm.exception) == 'no key "two"'
+
+    def test_enum_error_raises_named_class(self):
+        assert somelib.ExceptionRaiser.check_range(50) == 50
+        with self.assertRaises(ValueError) as cm:
+            somelib.ExceptionRaiser.check_range(101)
+        assert cm.exception.args[0] == somelib.OutOfRange.TooLarge
+
+    def test_unnamed_error_raises_exception(self):
+        with self.assertRaises(Exception) as cm:
+            somelib.ResultOpaque.new_failing_foo()
+        assert type(cm.exception) is Exception
+
+    def test_attribute_error_from_getattr(self):
+        raiser = somelib.ExceptionRaiser()
+        assert raiser.answer == 42
+        assert hasattr(raiser, "answer")
+        assert not hasattr(raiser, "question")
+        assert getattr(raiser, "question", None) is None
+        with self.assertRaises(AttributeError) as cm:
+            raiser.question
+        assert str(cm.exception) == 'no attribute "question"'
+
+
+class TestFallibleIterator(unittest.TestCase):
+    def test_iterates_until_exhausted(self):
+        items = list(somelib.FallibleIterable(3, 3))
+        assert len(items) == 3
+        for i, item in enumerate(items):
+            item.assert_integer(i)
+
+    def test_error_raises_instead_of_ending(self):
+        iterator = iter(somelib.FallibleIterable(5, 2))
+        next(iterator).assert_integer(0)
+        next(iterator).assert_integer(1)
+        with self.assertRaises(Exception) as cm:
+            next(iterator)
+        assert cm.exception.args[0] == somelib.ErrorEnum.Bar
+
+    def test_error_propagates_out_of_for_loop(self):
+        seen = []
+        with self.assertRaises(Exception):
+            for item in somelib.FallibleIterable(5, 2):
+                seen.append(item)
+        assert len(seen) == 2
+
+    def test_next_signature_is_the_item(self):
+        assert somelib.FallibleIterator.__next__.__doc__.splitlines()[0].endswith(".ResultOpaque")

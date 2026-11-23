@@ -37,11 +37,23 @@ st
     {%- if is_out -%} {% let prop_type = "ro" %} {%- else -%} {%- let prop_type = "rw" -%}{%- endif -%}
 
     {%- for f in fields %}
-    {%- if let hir::Type::Opaque(op) = f.ty && op.is_owned() %}
+    {#- Owned opaques are read as the pointer they own; optional ones as `nullable` so they are typed `T | None`. -#}
+    {%- if let hir::Type::Opaque(op) = f.ty && (op.is_owned() || op.is_optional()) %}
+    {%- decl field_ptr -%}
+    {%- if op.is_owned() -%}{%- let field_ptr = format!("self.{}.get()", f.name) -%}{%- else -%}{%- let field_ptr = format!("self.{}", f.name) -%}{%- endif %}
     .def_prop_{{prop_type}}("{{f.name}}",
-        [](const {{type_name}}& self) { return self.{{f.name}}.get(); }
+        {%- if op.is_optional() %}
+        [](const {{type_name}}& self) { return nullable<decltype({{field_ptr}})>{ {{-field_ptr-}} }; }
+        {%- else %}
+        [](const {{type_name}}& self) { return {{field_ptr}}; }
+        {%- endif %}
     {%- if !is_out %},
+        {%- if op.is_owned() %}
         []({{type_name}}& self, {{f.type_name}}&& v) { self.{{f.name}} = std::move(v); }
+        {%- else %}
+        []({{type_name}}& self, {{f.type_name}} v) { self.{{f.name}} = v; },
+        nb::for_setter(nb::arg("value").none())
+        {%- endif %}
     {%- endif %}
     {%- if let Some(doc) = f.docstring %}, {{doc}}{% endif %}
     )

@@ -43,7 +43,7 @@ However, if you still wish to access these structs mutably within your own metho
 These are also bound as classes, but with an inner bound `enum.Enum` class. The variants can be accessed through the parent `Type.*`, but the inner enum type can be accessed through `Type.Type`. 
 
 ### Options
-Any `Option<T>` type in Python is represented as a `T | None` value.
+Any `Option<T>` type in Python is represented as a `T | None` value, including an `Option<Box<T>>` or `Option<&T>` of an opaque `T` returned from a method or getter or held in a struct field.
 
 ### Results
 All `Result<T, E>` functions return `T`, and throw an `Exception` with `Exception.args` set to contain `E` converted into Python:
@@ -54,6 +54,16 @@ try:
 except Exception as e:
     error_type = e.args[0]
 ```
+
+An error type can name a built-in Python exception class to be raised as instead, with `#[diplomat::attr(nanobind, exception = "...")]`. A method renamed to `__getattr__` should fail with an error raised as `AttributeError`, so `hasattr` and `getattr(obj, name, default)` work:
+
+```rust
+#[diplomat::opaque]
+#[diplomat::attr(nanobind, exception = "AttributeError")]
+pub struct MissingAttribute(String);
+```
+
+An iterator whose `next` returns a `Result` raises its error from the iteration (see [fallible iterators](../attrs/iterators.md#fallible-iterators)).
 
 ### Slices
 |    Diplomat Type                       |       Python Type      |

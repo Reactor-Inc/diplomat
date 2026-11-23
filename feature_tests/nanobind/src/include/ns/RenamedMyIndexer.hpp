@@ -12,6 +12,7 @@
 #include <optional>
 #include <cstdlib>
 #include "../diplomat_runtime.hpp"
+#include "RenamedMyStringIterator.hpp"
 
 
 namespace somelib::ns {
@@ -25,6 +26,8 @@ namespace capi {
 
     typedef struct namespace_MyIndexer_get_str_result {union {somelib::diplomat::capi::DiplomatStringView ok; }; bool is_ok;} namespace_MyIndexer_get_str_result;
     namespace_MyIndexer_get_str_result namespace_MyIndexer_get_str(const somelib::ns::capi::RenamedMyIndexer* self, somelib::diplomat::capi::DiplomatStringView s);
+
+    somelib::ns::capi::RenamedMyStringIterator* namespace_MyIndexer_iter(const somelib::ns::capi::RenamedMyIndexer* self);
 
     void namespace_MyIndexer_destroy(RenamedMyIndexer* self);
 
@@ -47,6 +50,15 @@ inline std::optional<std::string_view> somelib::ns::RenamedMyIndexer::operator[]
     auto result = somelib::ns::capi::namespace_MyIndexer_get_str(this->AsFFI(),
         {s.data(), s.size()});
     return result.is_ok ? std::optional<std::string_view>(std::string_view(result.ok.data, result.ok.len)) : std::nullopt;
+}
+
+inline std::unique_ptr<somelib::ns::RenamedMyStringIterator> somelib::ns::RenamedMyIndexer::iter() const DIPLOMAT_LIFETIME_BOUND {
+    auto result = somelib::ns::capi::namespace_MyIndexer_iter(this->AsFFI());
+    return std::unique_ptr<somelib::ns::RenamedMyStringIterator>(somelib::ns::RenamedMyStringIterator::FromFFI(result));
+}
+
+inline somelib::diplomat::next_to_iter_helper<somelib::ns::RenamedMyStringIterator>somelib::ns::RenamedMyIndexer::begin() const {
+    return iter();
 }
 
 inline const somelib::ns::capi::RenamedMyIndexer* somelib::ns::RenamedMyIndexer::AsFFI() const {

@@ -14,6 +14,8 @@ namespace somelib {
 namespace ns {
 namespace capi { struct RenamedMyIndexer; }
 class RenamedMyIndexer;
+namespace capi { struct RenamedMyStringIterator; }
+class RenamedMyStringIterator;
 } // namespace ns
 } // namespace somelib
 
@@ -34,6 +36,10 @@ public:
   inline std::optional<std::string_view> operator[](size_t i) const DIPLOMAT_LIFETIME_BOUND;
 
   inline std::optional<std::string_view> operator[](std::string_view s) const DIPLOMAT_LIFETIME_BOUND;
+
+  inline std::unique_ptr<somelib::ns::RenamedMyStringIterator> iter() const DIPLOMAT_LIFETIME_BOUND;
+  inline somelib::diplomat::next_to_iter_helper<somelib::ns::RenamedMyStringIterator> begin() const;
+  inline std::nullopt_t end() const { return std::nullopt; }
 
     inline const somelib::ns::capi::RenamedMyIndexer* AsFFI() const;
     inline somelib::ns::capi::RenamedMyIndexer* AsFFI();

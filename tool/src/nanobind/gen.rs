@@ -52,6 +52,9 @@ pub(super) struct MethodInfo<'a> {
     /// If this has a callback which takes an Opaque& reference (so we can swap them out with pointers.)
     /// See https://github.com/rust-diplomat/diplomat/issues/1197 for more.
     pub(super) has_op_cb: bool,
+    /// Whether the binding returns None for a null opaque (`Option<Box<T>>` or `Option<&T>`, also inside a
+    /// `Result`), and so marks the return nullable for its Python signature to read `T | None`.
+    pub(super) nullable_return: bool,
 }
 
 /// A type name with a corresponding variable name, such as a struct field or a function parameter.
@@ -71,6 +74,63 @@ impl<'a, P: hir::TyPosition> NamedType<'a, P> {
     pub(super) fn default_value(&self) -> Option<&hir::DefaultArgValue> {
         self.default_value.as_ref()
     }
+}
+
+/// A method parameter as `method_params.cpp.jinja` renders it.
+pub(super) trait NanobindParam {
+    fn input_ty(&self) -> &hir::Type<hir::InputOnly>;
+    fn declared_default(&self) -> Option<&hir::DefaultArgValue>;
+
+    /// Whether Python callers may omit the argument: it has a declared default, or it is
+    /// optional and the template defaults it to `None`.
+    fn has_default(&self) -> bool {
+        self.declared_default().is_some()
+            || match self.input_ty() {
+                Type::DiplomatOption(_) => true,
+                Type::Opaque(path) => path.is_optional(),
+                _ => false,
+            }
+    }
+}
+
+impl NanobindParam for hir::Param {
+    fn input_ty(&self) -> &hir::Type<hir::InputOnly> {
+        &self.ty
+    }
+
+    fn declared_default(&self) -> Option<&hir::DefaultArgValue> {
+        self.default_value()
+    }
+}
+
+impl NanobindParam for NamedType<'_, hir::InputOnly> {
+    fn input_ty(&self) -> &hir::Type<hir::InputOnly> {
+        self.ty
+    }
+
+    fn declared_default(&self) -> Option<&hir::DefaultArgValue> {
+        self.default_value()
+    }
+}
+
+/// The index of the first parameter to make keyword-only: the first one without a default
+/// that follows one with a default.
+///
+/// Python forbids a positional parameter without a default after one with a default, so
+/// nanobind's signature (and every stub generated from it) would be invalid. Marking the rest
+/// keyword-only keeps every default and every keyword call.
+pub(super) fn keyword_only_from<'p, P: NanobindParam + 'p>(
+    params: impl IntoIterator<Item = &'p P>,
+) -> Option<usize> {
+    let mut seen_default = false;
+    for (index, param) in params.into_iter().enumerate() {
+        if param.has_default() {
+            seen_default = true;
+        } else if seen_default {
+            return Some(index);
+        }
+    }
+    None
 }
 
 /// An enum variant's name plus its (optional, pre-escaped) docstring.
@@ -649,13 +709,15 @@ impl<'ccx, 'tcx: 'ccx> ItemGenContext<'ccx, 'tcx> {
                 .map(|p| visitor.visit_param(&p.ty, p.name.as_str())),
         );
 
-        let self_number = if matches!(
+        // Constructors are bound with `nb::new_`, whose `__new__` takes the type as its first argument: the
+        // new object is still the return value (0), but the parameters start one later.
+        let first_param_number = if matches!(
             method.attrs.special_method,
             Some(hir::SpecialMethod::Constructor)
         ) {
-            1 // per the docs, constructors don't have "returns", they act on "self"
+            2
         } else {
-            0
+            1
         };
 
         let mut lifetime_args = vec![];
@@ -663,14 +725,17 @@ impl<'ccx, 'tcx: 'ccx> ItemGenContext<'ccx, 'tcx> {
         // Only returned values that are either created on return or return addresses previously unknown
         // to nanobind require additional annotation with keep_alive per: https://nanobind.readthedocs.io/en/latest/api_core.html#_CPPv4N8nanobind9rv_policyE
         // For any return of a reference to an existing object, nanobind is smart enough to locate its python wrapper object & correctly increment its refcount
-        // No keep_alive for even borrowed string outputs, the type conversion always involves a copy
-        if matches!(
+        // No keep_alive for even borrowed string outputs, the type conversion always involves a copy. That holds for
+        // an iterator's items too: only the opaques it yields borrow from it. A copied item is also not
+        // weak-referenceable, so nanobind raises on any keep_alive whose nurse it is.
+        let is_iterator = matches!(
             method.attrs.special_method,
             Some(hir::SpecialMethod::Iterator)
-        ) || matches!(
+        );
+        if matches!(
             method.output.success_type(),
             hir::SuccessType::OutType(hir::OutType::Struct(..))
-        ) || matches!(method.output.success_type(), hir::SuccessType::OutType(hir::OutType::Opaque(pth)) if pth.is_owned())
+        ) || matches!(method.output.success_type(), hir::SuccessType::OutType(hir::OutType::Opaque(pth)) if pth.is_owned() || is_iterator)
         {
             lifetime_args.extend(
                 param_borrows
@@ -680,10 +745,8 @@ impl<'ccx, 'tcx: 'ccx> ItemGenContext<'ccx, 'tcx> {
                         hir::borrowing_param::ParamBorrowInfo::BorrowedSlice
                         | hir::borrowing_param::ParamBorrowInfo::Struct(_)
                         | hir::borrowing_param::ParamBorrowInfo::BorrowedOpaque => {
-                            Some(format!(
-                                "nb::keep_alive<{self_number}, {}>()",
-                                i + 1 + self_number
-                            )) // Keep 0 (the return) alive until the element at P is returned
+                            // Keep the parameter alive for as long as the returned object lives.
+                            Some(format!("nb::keep_alive<0, {}>()", i + first_param_number))
                         }
                         _ => None,
                     })
@@ -708,6 +771,21 @@ impl<'ccx, 'tcx: 'ccx> ItemGenContext<'ccx, 'tcx> {
             lifetime_args.push(str.to_owned());
         }
 
+        // Iterators, indexers and iterables raise or hand Python an object instead of returning None, and
+        // constructors cannot return None.
+        let nullable_return = matches!(
+            method.output.success_type(),
+            hir::SuccessType::OutType(hir::Type::Opaque(path)) if path.is_optional()
+        ) && !matches!(
+            method.attrs.special_method,
+            Some(
+                hir::SpecialMethod::Iterator
+                    | hir::SpecialMethod::Indexer
+                    | hir::SpecialMethod::Iterable
+                    | hir::SpecialMethod::Constructor
+            )
+        );
+
         Some(MethodInfo {
             method,
             method_name,
@@ -724,6 +802,7 @@ impl<'ccx, 'tcx: 'ccx> ItemGenContext<'ccx, 'tcx> {
             overloads: vec![],
             docstring: self.formatter.fmt_doc_literal(&method.docs, &method.attrs),
             has_op_cb,
+            nullable_return,
         })
     }
 }
